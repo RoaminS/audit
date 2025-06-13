@@ -298,6 +298,29 @@ pip install -r requirements.txt
 #     # dans votre torrc (ce qui est déconseillé pour la production).
 
 
+# For a real test, ensure Tor is running and you have a proxies.txt or list
+# Create a dummy proxy list file for testing if you want to use it
+# with open("proxies_crawler_test.txt", "w") as f:
+#     f.write("http://mock-good-proxy1.com:8080\n")
+#     f.write("http://mock-bad-proxy.com:8081\n") # This will be simulated to fail
+
+# Initialize IpRotator with some example configuration (adjust as needed for your setup)
+# Using a dummy proxy list and Tor enabled for demonstration.
+# Replace "your_tor_password" if you have one set for your Tor control port.
+ip_rotator = IPRotator(
+    proxy_list_path="proxies_crawler_test.txt", # Create this file or pass proxy_list=[]
+    tor_enabled=True,
+    tor_port=9050,
+    tor_control_port=9051,
+    tor_password=None # Set your Tor password here if applicable
+)
+
+# Use a safe, public website for testing (e.g., testphp.vulnweb.com or a simple demo site you control)
+# For a quick test, using an internal IP or a very simple local server is safer and faster.
+target_url = "http://httpbin.org/html" # A simple page for testing parsing
+# target_url = "https://example.com" # A more realistic public site
+
+
 Configurer le fichier :
 ```
 config.py
