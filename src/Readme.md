@@ -227,6 +227,14 @@ Guide d'Installation et d'Utilisation
 
 Prérequis
 Python 3.8+: Assurez-vous d'avoir une version récente de Python.
+
+Créer un environnement virtuel:
+```
+python -m venv venv
+source venv/bin/activate  # Sur Linux/macOS
+# venv\Scripts\activate   # Sur Windows
+```
+
 Git: Pour cloner le répertoire du projet.
 
 Tor (optionnel): Si vous souhaitez utiliser la rotation d'IP via Tor, assurez-vous que Tor est installé et en cours d'exécution sur votre système (généralement sur 127.0.0.1:9050 pour SOCKS et 127.0.0.1:9051 pour le contrôle). 
@@ -236,7 +244,16 @@ Vous devrez peut-être installer stem pour interagir avec le contrôle Tor.
 Playwright: Pour le crawling de contenu JavaScript dynamique, Playwright est utilisé.
 
 Installez la bibliothèque Python: 
+```
 pip install playwright
+```
 
 Installez les navigateurs nécessaires: 
 playwright install (ex: chromium, firefox, webkit).
+
+```
+pip install -r requirements.txt
+```
+
+Configurer le fichier 'src/config.py'
+
