@@ -1,17 +1,21 @@
 # anonymity/proxy_manager.py
 
-import random
-import requests
+import asyncio
+import httpx
+import logging
 import time
 from collections import deque
 
+logger = logging.getLogger(__name__)
+
 class ProxyManager:
-    def __init__(self, proxy_list=None, validation_url='http://ipinfo.io/json', validation_timeout=5, rotate_interval=300):
+    def __init__(self, proxy_list=None, proxy_list_path=None, validation_url='http://ipinfo.io/json', validation_timeout=5, rotate_interval=300):
         """
         Gère un pool de proxies, leur rotation et leur validation.
 
         Args:
             proxy_list (list): Une liste de chaînes de caractères de proxies (e.g., "http://user:pass@host:port").
+            proxy_list_path (str): Chemin vers un fichier texte contenant une liste de proxies, un par ligne.
             validation_url (str): L'URL utilisée pour valider les proxies en vérifiant leur IP.
             validation_timeout (int): Le délai d'attente en secondes pour la validation des proxies.
             rotate_interval (int): L'intervalle en secondes après lequel un proxy est marqué comme "à faire pivoter".
@@ -21,29 +25,42 @@ class ProxyManager:
         self.validation_url = validation_url
         self.validation_timeout = validation_timeout
         self.rotate_interval = rotate_interval
-        self.load_proxies(proxy_list)
+
+        if proxy_list:
+            self._load_proxies_from_list(proxy_list)
+        elif proxy_list_path:
+            self._load_proxies_from_file(proxy_list_path)
+        else:
+            logger.warning("No proxy list or path provided. Proxy rotation will be limited.")
+
         self.current_proxy = None
         self.last_rotation_time = 0
 
-    def load_proxies(self, proxy_list):
-        """
-        Charge les proxies dans le gestionnaire.
+    def _load_proxies_from_list(self, proxy_list):
+        """Charge les proxies à partir d'une liste."""
+        for proxy_url in proxy_list:
+            self.proxies.append(proxy_url)
+            self.active_proxies[proxy_url] = {'last_used': 0, 'valid': False}
+        logger.info(f"Loaded {len(proxy_list)} proxies from list.")
 
-        Args:
-            proxy_list (list): Une liste de chaînes de caractères de proxies.
-        """
-        if proxy_list:
-            for proxy_url in proxy_list:
-                self.proxies.append(proxy_url)
-                self.active_proxies[proxy_url] = {'last_used': 0, 'valid': False}
-            print(f"Chargement de {len(proxy_list)} proxies.")
-            self.validate_all_proxies()
-        else:
-            print("Aucune liste de proxies fournie.")
+    def _load_proxies_from_file(self, path):
+        """Charge les proxies à partir d'un fichier."""
+        try:
+            with open(path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        self.proxies.append(line)
+                        self.active_proxies[line] = {'last_used': 0, 'valid': False}
+            logger.info(f"Loaded {len(self.proxies)} proxies from {path}")
+        except FileNotFoundError:
+            logger.error(f"Proxy list file not found: {path}")
+        except Exception as e:
+            logger.error(f"Error loading proxies from file: {e}")
 
-    def validate_proxy(self, proxy_url):
+    async def validate_proxy(self, proxy_url):
         """
-        Valide un proxy en tentant une requête via celui-ci.
+        Valide un proxy en tentant une requête via celui-ci de manière asynchrone.
 
         Args:
             proxy_url (str): L'URL du proxy à valider.
@@ -53,30 +70,35 @@ class ProxyManager:
         """
         try:
             proxies = {
-                "http": proxy_url,
-                "https": proxy_url,
+                "http://": proxy_url,
+                "https://": proxy_url,
             }
-            response = requests.get(self.validation_url, proxies=proxies, timeout=self.validation_timeout)
-            if response.status_code == 200:
-                ip_info = response.json()
-                print(f"Proxy {proxy_url} valide. IP: {ip_info.get('ip')}")
-                self.active_proxies[proxy_url]['valid'] = True
-                return True
-            else:
-                print(f"Proxy {proxy_url} invalide. Statut: {response.status_code}")
-                self.active_proxies[proxy_url]['valid'] = False
-                return False
-        except requests.exceptions.RequestException as e:
-            print(f"Erreur lors de la validation du proxy {proxy_url}: {e}")
+            async with httpx.AsyncClient(proxies=proxies, timeout=self.validation_timeout) as client:
+                response = await client.get(self.validation_url)
+                if response.status_code == 200:
+                    ip_info = response.json()
+                    logger.debug(f"Proxy {proxy_url} valid. IP: {ip_info.get('ip')}")
+                    self.active_proxies[proxy_url]['valid'] = True
+                    return True
+                else:
+                    logger.warning(f"Proxy {proxy_url} invalid response: {response.status_code}")
+                    self.active_proxies[proxy_url]['valid'] = False
+                    return False
+        except httpx.RequestError as e:
+            logger.warning(f"Proxy {proxy_url} validation failed: {e}")
+            self.active_proxies[proxy_url]['valid'] = False
+            return False
+        except Exception as e:
+            logger.warning(f"An unexpected error occurred while validating proxy {proxy_url}: {e}")
             self.active_proxies[proxy_url]['valid'] = False
             return False
 
-    def validate_all_proxies(self):
-        """Valide tous les proxies chargés."""
-        print("Validation de tous les proxies...")
-        for proxy_url in list(self.active_proxies.keys()): # Iterate over a copy to allow modification
-            self.validate_proxy(proxy_url)
-        print("Validation des proxies terminée.")
+    async def validate_all_proxies(self):
+        """Valide tous les proxies chargés de manière asynchrone."""
+        logger.info("Validating all proxies...")
+        tasks = [self.validate_proxy(proxy_url) for proxy_url in list(self.active_proxies.keys())]
+        await asyncio.gather(*tasks)
+        logger.info("Proxy validation completed.")
 
     def get_proxy(self):
         """
@@ -87,16 +109,16 @@ class ProxyManager:
             str: L'URL du proxy actuel, ou None si aucun proxy valide n'est disponible.
         """
         if not self.active_proxies:
-            print("Aucun proxy n'est chargé ou actif.")
+            logger.warning("No proxies loaded or active.")
             return None
 
         # Prioritize rotating if current proxy is old or invalid
         if self.current_proxy and (time.time() - self.active_proxies[self.current_proxy]['last_used'] > self.rotate_interval or not self.active_proxies[self.current_proxy]['valid']):
-            print(f"Proxy actuel {self.current_proxy} à faire pivoter ou invalide. Rotation...")
+            logger.info(f"Current proxy {self.current_proxy} needs rotation or is invalid. Rotating...")
             self.rotate_proxy()
             return self.current_proxy
 
-        # Initial selection or if current_proxy is None
+        # Initial selection or if current_proxy is None or invalid
         if not self.current_proxy or not self.active_proxies.get(self.current_proxy, {}).get('valid'):
             self.rotate_proxy()
             return self.current_proxy
@@ -108,7 +130,7 @@ class ProxyManager:
         Fait pivoter le proxy vers le prochain proxy valide disponible dans le pool.
         """
         if not self.proxies:
-            print("Aucun proxy dans le pool pour effectuer une rotation.")
+            logger.warning("No proxies in the pool to rotate.")
             self.current_proxy = None
             return
 
@@ -119,15 +141,15 @@ class ProxyManager:
                 self.current_proxy = candidate_proxy
                 self.active_proxies[self.current_proxy]['last_used'] = time.time()
                 self.proxies.append(candidate_proxy) # Put it back at the end
-                print(f"Rotation vers le proxy: {self.current_proxy}")
+                logger.info(f"Rotated to proxy: {self.current_proxy}")
                 self.last_rotation_time = time.time()
                 return
             else:
                 # If invalid, put it at the end but don't consider it immediately
                 self.proxies.append(candidate_proxy)
-                print(f"Proxy {candidate_proxy} est invalide, skipping pour la rotation.")
+                logger.warning(f"Proxy {candidate_proxy} is invalid, skipping for rotation.")
 
-        print("Impossible de trouver un proxy valide pour la rotation. Réessayez de valider tous les proxies.")
+        logger.error("Could not find a valid proxy for rotation. Consider re-validating all proxies.")
         self.current_proxy = None
 
     def mark_proxy_invalid(self, proxy_url):
@@ -139,10 +161,10 @@ class ProxyManager:
         """
         if proxy_url in self.active_proxies:
             self.active_proxies[proxy_url]['valid'] = False
-            print(f"Proxy {proxy_url} marqué comme invalide.")
+            logger.warning(f"Proxy {proxy_url} marked as invalid.")
             # Trigger a rotation if the current proxy becomes invalid
             if self.current_proxy == proxy_url:
-                print("Le proxy actuel est devenu invalide. Déclenchement d'une rotation immédiate.")
+                logger.info("Current proxy became invalid. Triggering immediate rotation.")
                 self.rotate_proxy()
 
     def get_current_proxy(self):
@@ -158,68 +180,72 @@ class ProxyManager:
         return len(self.proxies)
 
 if __name__ == '__main__':
-    # Exemple d'utilisation
-    print("Test du ProxyManager...")
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+    logger.info("Testing ProxyManager...")
 
-    # Liste de proxies d'exemple (remplacez par vos propres proxies)
-    # Pour le test, nous allons simuler un proxy qui pourrait échouer
-    example_proxies = [
-        "http://good.proxy.com:8080",
-        "http://user:pass@bad.proxy.com:8081", # Ceci pourrait échouer
-        "http://another.good.proxy.com:8082",
-    ]
+    # Create a dummy proxy list file for testing
+    with open("proxies_test.txt", "w") as f:
+        f.write("http://mock-good-proxy1.com:8080\n")
+        f.write("http://mock-bad-proxy.com:8081\n") # This will be simulated to fail
+        f.write("http://mock-good-proxy2.com:8082\n")
 
-    # Pour un test réel, utilisez de vrais proxies ou un service de mock.
-    # Ici, nous allons simuler le comportement de validation.
-    # NOTE: Pour que cet exemple fonctionne réellement avec la validation,
-    # vous devrez avoir des proxies fonctionnels ou un serveur de test local.
+    # Mocking httpx.AsyncClient for demonstration purposes
+    # In a real scenario, these would be actual network requests.
+    class MockResponse:
+        def __init__(self, status_code, json_data=None):
+            self.status_code = status_code
+            self._json_data = json_data
 
-    # Mocking requests.get for demonstration purposes
-    original_get = requests.get
+        def json(self):
+            return self._json_data
 
-    def mock_requests_get(url, proxies=None, timeout=None):
-        if proxies and "bad.proxy.com" in proxies.get('http', ''):
-            print(f"Simulating failure for {proxies.get('http')}")
-            raise requests.exceptions.RequestException("Simulated connection error")
-        elif proxies and ("good.proxy.com" in proxies.get('http', '') or "another.good.proxy.com" in proxies.get('http', '')):
-            print(f"Simulating success for {proxies.get('http')}")
-            class MockResponse:
-                def __init__(self):
-                    self.status_code = 200
-                def json(self):
-                    return {"ip": "192.168.1.1"}
-            return MockResponse()
+    async def mock_httpx_get(url, proxies=None, timeout=None):
+        if proxies and "mock-bad-proxy.com" in proxies.get('http://', ''):
+            logger.debug(f"Simulating failure for {proxies.get('http://')}")
+            raise httpx.RequestError("Simulated connection error", request=httpx.Request("GET", url))
+        elif proxies and ("mock-good-proxy1.com" in proxies.get('http://', '') or "mock-good-proxy2.com" in proxies.get('http://', '')):
+            logger.debug(f"Simulating success for {proxies.get('http://')}")
+            ip = "192.168.1.1" if "mock-good-proxy1.com" in proxies.get('http://', '') else "192.168.1.2"
+            return MockResponse(200, {"ip": ip})
         else:
-            return original_get(url, proxies=proxies, timeout=timeout)
+            # Fallback for direct requests if needed, but in this test, proxies are always used.
+            return MockResponse(200, {"ip": "127.0.0.1"}) # Direct IP
 
-    requests.get = mock_requests_get
+    # Patch httpx.AsyncClient.get to use our mock
+    original_httpx_get = httpx.AsyncClient.get
+    httpx.AsyncClient.get = mock_httpx_get
 
-    pm = ProxyManager(proxy_list=example_proxies, validation_url='http://mock-ipinfo.io/json', rotate_interval=10)
+    async def main():
+        pm = ProxyManager(proxy_list_path="proxies_test.txt", validation_url='http://mock-ipinfo.io/json', rotate_interval=10)
 
-    print("\nTentative de récupération du premier proxy...")
-    current_p = pm.get_proxy()
-    if current_p:
-        print(f"Proxy actuel: {current_p}")
-    else:
-        print("Aucun proxy n'a pu être récupéré.")
+        await pm.validate_all_proxies()
 
-    print("\nAttente pour simuler la rotation...")
-    time.sleep(11) # Attendre plus que rotate_interval
+        print("\nAttempting to get the first proxy...")
+        current_p = pm.get_proxy()
+        if current_p:
+            print(f"Current proxy: {current_p}")
+        else:
+            print("No proxy could be retrieved.")
 
-    print("\nTentative de récupération d'un nouveau proxy après intervalle...")
-    current_p = pm.get_proxy()
-    if current_p:
-        print(f"Nouveau proxy après rotation: {current_p}")
-    else:
-        print("Aucun nouveau proxy n'a pu être récupéré après rotation.")
+        print("\nWaiting to simulate rotation interval...")
+        await asyncio.sleep(11) # Wait longer than rotate_interval
 
-    print("\nMarquage du proxy actuel comme invalide et déclenchement d'une rotation...")
-    if pm.get_current_proxy():
-        pm.mark_proxy_invalid(pm.get_current_proxy())
-        print(f"Proxy après marquage invalide: {pm.get_current_proxy()}")
-    else:
-        print("Pas de proxy actuel à marquer invalide.")
+        print("\nAttempting to get a new proxy after interval...")
+        current_p = pm.get_proxy()
+        if current_p:
+            print(f"New proxy after rotation: {current_p}")
+        else:
+            print("No new proxy could be retrieved after rotation.")
 
-    # Restaurer la fonction originale
-    requests.get = original_get
-    print("\nTest du ProxyManager terminé.")
+        print("\nMarking current proxy as invalid and triggering rotation...")
+        if pm.get_current_proxy():
+            pm.mark_proxy_invalid(pm.get_current_proxy())
+            print(f"Proxy after marking invalid: {pm.get_current_proxy()}")
+        else:
+            print("No current proxy to mark invalid.")
+
+    asyncio.run(main())
+
+    # Restore the original function
+    httpx.AsyncClient.get = original_httpx_get
+    logger.info("ProxyManager test completed.")
