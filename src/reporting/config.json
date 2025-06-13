@@ -1,0 +1,19 @@
+{
+    "dashboard_settings": {
+        "data_file": "scan_results.json"
+    },
+    "pdf_settings": {
+        "output_path": "reports",
+        "branding_logo": "assets/hebbscan_logo.png",
+        "default_report_filename": "HebbScan_Report.pdf",
+        "architecture_graph_figsize": [12, 10],
+        "vulnerability_map_figsize": [10, 6],
+        "learning_curves_figsize": [12, 6],
+        "graph_layout_k": 0.15,
+        "graph_layout_iterations": 20
+    },
+    "scan_settings": {
+        "default_target_url": "http://testphp.vulnweb.com"
+        // ... autres paramètres de scan si tu en as
+    }
+}
