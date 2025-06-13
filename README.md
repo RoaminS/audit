@@ -278,6 +278,26 @@ playwright install (ex: chromium, firefox, webkit).
 pip install -r requirements.txt
 ```
 
+# Assurez-vous que Tor est en cours d'exécution et que le port de contrôle (9051)
+# est accessible. Si vous utilisez un mot de passe, modifiez la ligne suivante.
+# Pour de nombreux setups, si vous configurez ControlPort avec CookieAuthentication,
+# vous n'avez pas besoin de spécifier un mot de passe ici.
+
+# Exemple pour macOS/Linux (assurez-vous que le fichier de cookie est lisible par l'utilisateur)
+# try:
+#     with open("/opt/homebrew/var/lib/tor/control_auth_cookie", "rb") as f:
+#         cookie = f.read()
+#     # Si vous utilisez un cookie, authentification se fait via le cookie.
+#     # La classe TorManager devrait être modifiée pour gérer l'authentification par cookie.
+#     # Pour l'exemple simple, nous allons supposer soit pas de mot de passe soit un mot de passe simple.
+# except FileNotFoundError:
+#     print("Fichier de cookie d'authentification Tor non trouvé.")
+#     print("Assurez-vous que Tor est configuré pour l'authentification par cookie ou par mot de passe.")
+#     print("Pour le test, nous allons tenter sans mot de passe.")
+#     # Pour tester sans mot de passe, vous devez avoir 'ControlPort 9051' et 'CookieAuthentication 0' ou 'HashedControlPassword ""'
+#     # dans votre torrc (ce qui est déconseillé pour la production).
+
+
 Configurer le fichier :
 ```
 config.py
