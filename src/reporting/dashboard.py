@@ -5,27 +5,158 @@ import networkx as nx
 import json
 import logging
 import os
+from urllib.parse import urlparse # Correction: Ajout de l'import manquant
 
 logger = logging.getLogger(__name__)
 
+# --- Configuration Management ---
+CONFIG_FILE = "reporting/config.json" # Assure-toi que ce chemin est correct par rapport à où tu lances Streamlit
+
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, 'r') as f:
+            return json.load(f)
+    return { # Valeurs par défaut si le fichier n'existe pas
+        "dashboard_settings": {
+            "data_file": "scan_results.json"
+        },
+        "pdf_settings": {
+            "output_path": "reports",
+            "branding_logo": "assets/hebbscan_logo.png", # Assure-toi que ce chemin est relatif ou absolu
+            "default_report_filename": "HebbScan_Report.pdf",
+            "architecture_graph_figsize": [12, 10],
+            "vulnerability_map_figsize": [10, 6],
+            "learning_curves_figsize": [12, 6],
+            "graph_layout_k": 0.15,
+            "graph_layout_iterations": 20
+        },
+        "scan_settings": {
+            "default_target_url": "http://testphp.vulnweb.com"
+        }
+    }
+
+def save_config(config_data):
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(config_data, f, indent=4)
+
+# Load config when the app starts
+config = load_config()
+
+# Update DATA_FILE to use the configured path
+DATA_FILE = config['dashboard_settings']['data_file']
+
 # Placeholder for data storage. In a real app, this would query a database.
-DATA_FILE = "scan_results.json"
+# DATA_FILE = "scan_results.json" # Commenter ou supprimer cette ligne
 
 def load_data():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, 'r') as f:
-            return json.load(f)
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                logger.error(f"Error decoding JSON from {DATA_FILE}. Returning empty data.")
+                return {"visited_urls": [], "discovered_endpoints": [], "scan_results": [], "hln_stats": {}, "target_url": "N/A"}
     return {"visited_urls": [], "discovered_endpoints": [], "scan_results": [], "hln_stats": {}, "target_url": "N/A"}
 
 def save_data(data):
+    # Ensure the directory for DATA_FILE exists
+    os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
     with open(DATA_FILE, 'w') as f:
         json.dump(data, f, indent=4)
+
+# Import PDFGenerator if you want to trigger PDF generation from dashboard
+from reporting.pdf_generator import PDFGenerator
 
 def run_dashboard():
     st.set_page_config(layout="wide", page_title="HebbScan Dashboard")
 
     st.sidebar.title("HebbScan Navigation")
     
+    # --- Configuration Section in Sidebar ---
+    st.sidebar.header("Configuration")
+    
+    with st.sidebar.expander("Dashboard Settings"):
+        new_data_file = st.text_input("Scan Results File", config['dashboard_settings']['data_file'])
+        if new_data_file != config['dashboard_settings']['data_file']:
+            config['dashboard_settings']['data_file'] = new_data_file
+            save_config(config)
+            st.rerun() # Rerun to load data from new file
+
+    with st.sidebar.expander("PDF Report Settings"):
+        new_output_path = st.text_input("PDF Output Directory", config['pdf_settings']['output_path'])
+        if new_output_path != config['pdf_settings']['output_path']:
+            config['pdf_settings']['output_path'] = new_output_path
+            save_config(config)
+
+        new_branding_logo = st.text_input("Branding Logo Path", config['pdf_settings']['branding_logo'])
+        if new_branding_logo != config['pdf_settings']['branding_logo']:
+            config['pdf_settings']['branding_logo'] = new_branding_logo
+            save_config(config)
+        
+        new_report_filename = st.text_input("Default Report Filename", config['pdf_settings']['default_report_filename'])
+        if new_report_filename != config['pdf_settings']['default_report_filename']:
+            config['pdf_settings']['default_report_filename'] = new_report_filename
+            save_config(config)
+
+        st.subheader("Graph Settings")
+        new_arch_figsize_w = st.number_input("Arch Graph Width", value=config['pdf_settings']['architecture_graph_figsize'][0], min_value=5, max_value=20)
+        new_arch_figsize_h = st.number_input("Arch Graph Height", value=config['pdf_settings']['architecture_graph_figsize'][1], min_value=5, max_value=20)
+        if (new_arch_figsize_w != config['pdf_settings']['architecture_graph_figsize'][0] or
+            new_arch_figsize_h != config['pdf_settings']['architecture_graph_figsize'][1]):
+            config['pdf_settings']['architecture_graph_figsize'] = [new_arch_figsize_w, new_arch_figsize_h]
+            save_config(config)
+
+        new_vuln_figsize_w = st.number_input("Vuln Map Width", value=config['pdf_settings']['vulnerability_map_figsize'][0], min_value=5, max_value=20)
+        new_vuln_figsize_h = st.number_input("Vuln Map Height", value=config['pdf_settings']['vulnerability_map_figsize'][1], min_value=5, max_value=20)
+        if (new_vuln_figsize_w != config['pdf_settings']['vulnerability_map_figsize'][0] or
+            new_vuln_figsize_h != config['pdf_settings']['vulnerability_map_figsize'][1]):
+            config['pdf_settings']['vulnerability_map_figsize'] = [new_vuln_figsize_w, new_vuln_figsize_h]
+            save_config(config)
+            
+        new_hln_figsize_w = st.number_input("HLN Curves Width", value=config['pdf_settings']['learning_curves_figsize'][0], min_value=5, max_value=20)
+        new_hln_figsize_h = st.number_input("HLN Curves Height", value=config['pdf_settings']['learning_curves_figsize'][1], min_value=5, max_value=20)
+        if (new_hln_figsize_w != config['pdf_settings']['learning_curves_figsize'][0] or
+            new_hln_figsize_h != config['pdf_settings']['learning_curves_figsize'][1]):
+            config['pdf_settings']['learning_curves_figsize'] = [new_hln_figsize_w, new_hln_figsize_h]
+            save_config(config)
+
+        new_graph_k = st.number_input("Graph Layout K", value=config['pdf_settings']['graph_layout_k'], min_value=0.01, max_value=1.0, step=0.01, format="%.2f")
+        new_graph_iter = st.number_input("Graph Layout Iterations", value=config['pdf_settings']['graph_layout_iterations'], min_value=1, max_value=100)
+        if new_graph_k != config['pdf_settings']['graph_layout_k'] or new_graph_iter != config['pdf_settings']['graph_layout_iterations']:
+            config['pdf_settings']['graph_layout_k'] = new_graph_k
+            config['pdf_settings']['graph_layout_iterations'] = new_graph_iter
+            save_config(config)
+
+    # Add a button to generate PDF report from the dashboard
+    st.sidebar.markdown("---")
+    st.sidebar.header("Report Generation")
+    if st.sidebar.button("Generate PDF Report"):
+        with st.spinner("Generating PDF report..."):
+            pdf_generator = PDFGenerator(
+                output_path=config['pdf_settings']['output_path'],
+                branding_logo=config['pdf_settings']['branding_logo']
+            )
+            try:
+                pdf_generator.generate_report(
+                    target_url=scan_data['target_url'],
+                    scan_results=scan_data['scan_results'],
+                    architecture_data={'visited_urls': scan_data['visited_urls'], 'discovered_endpoints': scan_data['discovered_endpoints']},
+                    hln_stats=scan_data['hln_stats'],
+                    output_filename=config['pdf_settings']['default_report_filename'],
+                    graph_params={ # Pass graph parameters
+                        "architecture_graph_figsize": tuple(config['pdf_settings']['architecture_graph_figsize']),
+                        "vulnerability_map_figsize": tuple(config['pdf_settings']['vulnerability_map_figsize']),
+                        "learning_curves_figsize": tuple(config['pdf_settings']['learning_curves_figsize']),
+                        "graph_layout_k": config['pdf_settings']['graph_layout_k'],
+                        "graph_layout_iterations": config['pdf_settings']['graph_layout_iterations']
+                    }
+                )
+                st.sidebar.success(f"PDF report generated successfully at {os.path.join(config['pdf_settings']['output_path'], config['pdf_settings']['default_report_filename'])}")
+            except Exception as e:
+                st.sidebar.error(f"Error generating PDF report: {e}")
+                logger.error(f"Error during PDF generation: {e}")
+    st.sidebar.markdown("---")
+
     # Load data for demonstration
     scan_data = load_data()
     
@@ -64,7 +195,7 @@ def run_dashboard():
                 'Count': [critical_count, high_count, medium_count, low_count]
             })
             fig = px.pie(criticality_counts, values='Count', names='Criticality', title='Vulnerabilities by Criticality',
-                         color_discrete_map={'CRITICAL':'red', 'HIGH':'orange', 'MEDIUM':'yellow', 'LOW':'green'})
+                            color_discrete_map={'CRITICAL':'red', 'HIGH':'orange', 'MEDIUM':'yellow', 'LOW':'green'})
             st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
@@ -72,13 +203,11 @@ def run_dashboard():
         st.markdown("This section visualizes the website architecture discovered by HebbScan and highlights potential attack surface points.")
 
         G = nx.DiGraph()
-        nodes_data = []
-        edges_data = []
+        # No need for nodes_data, edges_data if using matplotlib directly
 
         # Add visited URLs as nodes
         for url in scan_data['visited_urls']:
             G.add_node(url, type='URL', color='skyblue')
-            nodes_data.append({'id': url, 'label': urlparse(url).path or '/', 'group': 'URL'})
         
         # Add discovered endpoints and their connections
         for ep in scan_data['discovered_endpoints']:
@@ -87,22 +216,21 @@ def run_dashboard():
             # Ensure the endpoint URL is a node
             if ep_url not in G:
                 G.add_node(ep_url, type='Endpoint', color='lightcoral')
-                nodes_data.append({'id': ep_url, 'label': urlparse(ep_url).path, 'group': 'Endpoint'})
             
             # Add an edge from the base URL (if distinct) to the endpoint
+            # A more robust way would be to derive base URL from target_url
             if ep_url != scan_data['target_url']:
-                if scan_data['target_url'] in G and ep_url in G:
-                    G.add_edge(scan_data['target_url'], ep_url, label=f"Discovered ({ep_method})")
-                    edges_data.append({'source': scan_data['target_url'], 'target': ep_url, 'label': f"Discovered ({ep_method})"})
+                # Ensure the target_url node exists
+                if scan_data['target_url'] not in G:
+                    G.add_node(scan_data['target_url'], type='URL', color='skyblue')
+                G.add_edge(scan_data['target_url'], ep_url, label=f"Discovered ({ep_method})")
 
         if G.nodes:
-            # Use Pyvis for interactive graph, but requires HTML export.
-            # For direct Streamlit, can use networkx + matplotlib/plotly or a custom d3.js component.
-            # For simplicity, we'll draw with networkx and matplotlib for now.
             try:
                 import matplotlib.pyplot as plt
-                fig, ax = plt.subplots(figsize=(15, 12))
-                pos = nx.spring_layout(G, k=0.15, iterations=20, seed=42)
+                # Use figsize from config for dashboard's matplotlib graph
+                fig, ax = plt.subplots(figsize=tuple(config['pdf_settings']['architecture_graph_figsize'])) 
+                pos = nx.spring_layout(G, k=config['pdf_settings']['graph_layout_k'], iterations=config['pdf_settings']['graph_layout_iterations'], seed=42)
                 
                 node_colors = [G.nodes[node]['color'] for node in G.nodes()]
                 nx.draw_networkx_nodes(G, pos, node_color=node_colors, node_size=3000, alpha=0.9, ax=ax)
@@ -115,6 +243,7 @@ def run_dashboard():
                 ax.set_title("Reconstituted Website Architecture")
                 ax.axis('off')
                 st.pyplot(fig)
+                plt.close(fig) # Close the figure to free memory
             except Exception as e:
                 st.warning(f"Could not render architecture graph. Ensure matplotlib and networkx are installed. Error: {e}")
 
@@ -163,8 +292,8 @@ def run_dashboard():
             
             st.subheader("Successful Patterns per Endpoint")
             fig = px.bar(hln_df, x='endpoint_url', y='successful_patterns_count', 
-                         title='Number of Successful Patterns per Endpoint',
-                         labels={'endpoint_url': 'Endpoint URL', 'successful_patterns_count': 'Successful Patterns'})
+                            title='Number of Successful Patterns per Endpoint',
+                            labels={'endpoint_url': 'Endpoint URL', 'successful_patterns_count': 'Successful Patterns'})
             st.plotly_chart(fig, use_container_width=True)
 
             st.subheader("Average Neuron Weights Evolution (Conceptual)")
@@ -172,15 +301,15 @@ def run_dashboard():
             # For a real implementation, HLN should log weight changes over iterations.
             # Here, we'll plot average of final weights for each HLN.
             fig = px.bar(hln_df, x='endpoint_url', y='neuron_weights_avg', 
-                         title='Average Neuron Weights per Endpoint (Proxy for Learning Progression)',
-                         labels={'endpoint_url': 'Endpoint URL', 'neuron_weights_avg': 'Average Neuron Weight'})
+                            title='Average Neuron Weights per Endpoint (Proxy for Learning Progression)',
+                            labels={'endpoint_url': 'Endpoint URL', 'neuron_weights_avg': 'Average Neuron Weight'})
             st.plotly_chart(fig, use_container_width=True)
 
             st.info("Note: True 'learning curves' would require plotting metrics (e.g., success rate, weight changes) over iterations for each HLN. The current view shows a snapshot of final states.")
         else:
             st.info("No Hebbian Learning Network statistics available.")
 
-# To run the dashboard: `streamlit run src/reporting/dashboard.py`
+# To run the dashboard: `streamlit run reporting/dashboard.py`
 
 # Example of how to populate DATA_FILE for dashboard demo
 if __name__ == "__main__":
@@ -228,6 +357,8 @@ if __name__ == "__main__":
             "endpoint_hash_2": {"url": "http://testphp.vulnweb.com/login.php", "successful_patterns_count": 1, "neuron_weights_avg": 0.5}
         }
     }
+    # Save the dummy data to the path specified in config
+    current_config = load_config()
     save_data(dummy_scan_data)
-    print(f"Dummy scan data saved to {DATA_FILE}. Run `streamlit run src/reporting/dashboard.py` to view.")
+    print(f"Dummy scan data saved to {current_config['dashboard_settings']['data_file']}. Run `streamlit run reporting/dashboard.py` to view.")
     run_dashboard() # This will run the dashboard directly if this file is executed.
