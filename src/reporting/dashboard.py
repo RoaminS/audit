@@ -9,7 +9,6 @@ from urllib.parse import urlparse # Correction: Ajout de l'import manquant
 from utils.database import init_db, load_scan_data_from_db, save_scan_data_to_db
 from utils import helpers # For hashing if needed
 
-
 logger = logging.getLogger(__name__)
 
 # --- Configuration Management ---
@@ -18,10 +17,18 @@ CONFIG_FILE = "reporting/config.json" # Assure-toi que ce chemin est correct par
 def load_config():
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, 'r') as f:
-            return json.load(f)
-    return { # Valeurs par défaut si le fichier n'existe pas
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                logger.error(f"Error decoding JSON from {CONFIG_FILE}. Returning default config.")
+                # Fallback to default if config file is corrupted
+                return get_default_config()
+    return get_default_config() # Valeurs par défaut si le fichier n'existe pas
+
+def get_default_config():
+    return {
         "dashboard_settings": {
-            "data_file": "scan_results.json"
+            "data_source": "database" # Changed from "data_file" to "data_source"
         },
         "pdf_settings": {
             "output_path": "reports",
@@ -39,33 +46,25 @@ def load_config():
     }
 
 def save_config(config_data):
+    # Ensure the directory for CONFIG_FILE exists
+    os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
     with open(CONFIG_FILE, 'w') as f:
         json.dump(config_data, f, indent=4)
 
 # Load config when the app starts
 config = load_config()
 
-# Update DATA_FILE to use the configured path
-DATA_FILE = config['dashboard_settings']['data_file']
+# Data loading functions now abstract the source (DB)
+def load_scan_data():
+    """Loads scan data from the configured data source (currently database)."""
+    # For now, we only support database. If 'data_file' was an option,
+    # you'd add logic here to choose between file and DB.
+    return load_scan_data_from_db()
 
-# Placeholder for data storage. In a real app, this would query a database.
-# DATA_FILE = "scan_results.json" # Commenter ou supprimer cette ligne
-
-def load_data():
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, 'r') as f:
-            try:
-                return json.load(f)
-            except json.JSONDecodeError:
-                logger.error(f"Error decoding JSON from {DATA_FILE}. Returning empty data.")
-                return {"visited_urls": [], "discovered_endpoints": [], "scan_results": [], "hln_stats": {}, "target_url": "N/A"}
-    return {"visited_urls": [], "discovered_endpoints": [], "scan_results": [], "hln_stats": {}, "target_url": "N/A"}
-
-def save_data(data):
-    # Ensure the directory for DATA_FILE exists
-    os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
-    with open(DATA_FILE, 'w') as f:
-        json.dump(data, f, indent=4)
+def save_scan_data(data):
+    """Saves scan data to the configured data source (currently database)."""
+    # For now, we only support database.
+    save_scan_data_to_db(data)
 
 # Import PDFGenerator if you want to trigger PDF generation from dashboard
 from reporting.pdf_generator import PDFGenerator
@@ -79,11 +78,11 @@ def run_dashboard():
     st.sidebar.header("Configuration")
     
     with st.sidebar.expander("Dashboard Settings"):
-        new_data_file = st.text_input("Scan Results File", config['dashboard_settings']['data_file'])
-        if new_data_file != config['dashboard_settings']['data_file']:
-            config['dashboard_settings']['data_file'] = new_data_file
-            save_config(config)
-            st.rerun() # Rerun to load data from new file
+        # The 'data_file' setting is now replaced by 'data_source'.
+        # For simplicity, we'll assume it's always 'database' for now.
+        # If you want to switch between file and DB, you'd add a dropdown here.
+        st.write("Data Source: Database (fixed for now)")
+
 
     with st.sidebar.expander("PDF Report Settings"):
         new_output_path = st.text_input("PDF Output Directory", config['pdf_settings']['output_path'])
@@ -95,7 +94,7 @@ def run_dashboard():
         if new_branding_logo != config['pdf_settings']['branding_logo']:
             config['pdf_settings']['branding_logo'] = new_branding_logo
             save_config(config)
-        
+            
         new_report_filename = st.text_input("Default Report Filename", config['pdf_settings']['default_report_filename'])
         if new_report_filename != config['pdf_settings']['default_report_filename']:
             config['pdf_settings']['default_report_filename'] = new_report_filename
@@ -160,14 +159,14 @@ def run_dashboard():
                 logger.error(f"Error during PDF generation: {e}")
     st.sidebar.markdown("---")
 
-    # Load data for demonstration
-    scan_data = load_data()
+    # Load data for demonstration (from DB now)
+    scan_data = load_scan_data()
     
     st.sidebar.header("Scan Information")
-    st.sidebar.markdown(f"**Target URL:** {scan_data['target_url']}")
-    st.sidebar.markdown(f"**Discovered URLs:** {len(scan_data['visited_urls'])}")
-    st.sidebar.markdown(f"**Discovered Endpoints:** {len(scan_data['discovered_endpoints'])}")
-    st.sidebar.markdown(f"**Vulnerabilities Found:** {len(scan_data['scan_results'])}")
+    st.sidebar.markdown(f"**Target URL:** {scan_data.get('target_url', 'N/A')}")
+    st.sidebar.markdown(f"**Discovered URLs:** {len(scan_data.get('visited_urls', []))}")
+    st.sidebar.markdown(f"**Discovered Endpoints:** {len(scan_data.get('discovered_endpoints', []))}")
+    st.sidebar.markdown(f"**Vulnerabilities Found:** {len(scan_data.get('scan_results', []))}")
 
     st.title("HebbScan Automated Security Report Dashboard")
 
@@ -176,14 +175,14 @@ def run_dashboard():
 
     with tab1:
         st.header("Executive Summary")
-        total_vulnerabilities = len(scan_data['scan_results'])
-        critical_count = sum(1 for v in scan_data['scan_results'] if v.get('criticality') == 'CRITICAL')
-        high_count = sum(1 for v in scan_data['scan_results'] if v.get('criticality') == 'HIGH')
-        medium_count = sum(1 for v in scan_data['scan_results'] if v.get('criticality') == 'MEDIUM')
-        low_count = sum(1 for v in scan_data['scan_results'] if v.get('criticality') == 'LOW')
+        total_vulnerabilities = len(scan_data.get('scan_results', []))
+        critical_count = sum(1 for v in scan_data.get('scan_results', []) if v.get('criticality') == 'CRITICAL')
+        high_count = sum(1 for v in scan_data.get('scan_results', []) if v.get('criticality') == 'HIGH')
+        medium_count = sum(1 for v in scan_data.get('scan_results', []) if v.get('criticality') == 'MEDIUM')
+        low_count = sum(1 for v in scan_data.get('scan_results', []) if v.get('criticality') == 'LOW')
 
         st.markdown(f"""
-        This dashboard provides an interactive overview of the security assessment conducted by HebbScan on **{scan_data['target_url']}**.
+        This dashboard provides an interactive overview of the security assessment conducted by HebbScan on **{scan_data.get('target_url', 'N/A')}**.
         <br/><br/>
         A total of **{total_vulnerabilities}** potential vulnerabilities were identified:
         -   **Critical:** {critical_count}
@@ -206,14 +205,13 @@ def run_dashboard():
         st.markdown("This section visualizes the website architecture discovered by HebbScan and highlights potential attack surface points.")
 
         G = nx.DiGraph()
-        # No need for nodes_data, edges_data if using matplotlib directly
-
+        
         # Add visited URLs as nodes
-        for url in scan_data['visited_urls']:
+        for url in scan_data.get('visited_urls', []):
             G.add_node(url, type='URL', color='skyblue')
         
         # Add discovered endpoints and their connections
-        for ep in scan_data['discovered_endpoints']:
+        for ep in scan_data.get('discovered_endpoints', []):
             ep_url = ep['url']
             ep_method = ep['method']
             # Ensure the endpoint URL is a node
@@ -221,8 +219,7 @@ def run_dashboard():
                 G.add_node(ep_url, type='Endpoint', color='lightcoral')
             
             # Add an edge from the base URL (if distinct) to the endpoint
-            # A more robust way would be to derive base URL from target_url
-            if ep_url != scan_data['target_url']:
+            if scan_data.get('target_url') and ep_url != scan_data['target_url']:
                 # Ensure the target_url node exists
                 if scan_data['target_url'] not in G:
                     G.add_node(scan_data['target_url'], type='URL', color='skyblue')
@@ -251,9 +248,9 @@ def run_dashboard():
                 st.warning(f"Could not render architecture graph. Ensure matplotlib and networkx are installed. Error: {e}")
 
         st.subheader("Discovered Endpoints Details")
-        if scan_data['discovered_endpoints']:
+        if scan_data.get('discovered_endpoints', []):
             df_endpoints = pd.DataFrame(scan_data['discovered_endpoints'])
-            st.dataframe(df_endpoints.set_index('url'))
+            st.dataframe(df_endpoints[['url', 'method', 'type', 'params']].set_index('url'))
         else:
             st.info("No specific attack surface endpoints identified.")
 
@@ -261,7 +258,7 @@ def run_dashboard():
         st.header("Vulnerability Findings")
         st.markdown("Detailed list of detected vulnerabilities, including payload and recommendations.")
 
-        if scan_data['scan_results']:
+        if scan_data.get('scan_results', []):
             df_vulnerabilities = pd.DataFrame(scan_data['scan_results'])
             
             st.subheader("Filter Findings")
@@ -277,10 +274,13 @@ def run_dashboard():
             st.dataframe(filtered_df[['url', 'vulnerability_type', 'criticality', 'payload']].set_index('url'), use_container_width=True)
 
             st.subheader("Details")
-            selected_vuln_url = st.selectbox("Select a vulnerability by URL for details:", filtered_df['url'].unique())
-            if selected_vuln_url:
-                selected_vuln = filtered_df[filtered_df['url'] == selected_vuln_url].iloc[0]
-                st.json(selected_vuln.to_dict()) # Display all details as JSON
+            if not filtered_df.empty:
+                selected_vuln_url = st.selectbox("Select a vulnerability by URL for details:", filtered_df['url'].unique())
+                if selected_vuln_url:
+                    selected_vuln = filtered_df[filtered_df['url'] == selected_vuln_url].iloc[0]
+                    st.json(selected_vuln.to_dict()) # Display all details as JSON
+            else:
+                st.info("No vulnerabilities match the current filters.")
 
         else:
             st.info("No vulnerabilities detected in the scan data.")
@@ -289,7 +289,7 @@ def run_dashboard():
         st.header("Hebbian Learning Evolution")
         st.markdown("This section showcases the adaptive learning process of the Hebbian Networks.")
         
-        if scan_data['hln_stats']:
+        if scan_data.get('hln_stats', {}):
             hln_df = pd.DataFrame.from_dict(scan_data['hln_stats'], orient='index')
             hln_df['endpoint_url'] = hln_df['url']
             
@@ -300,9 +300,6 @@ def run_dashboard():
             st.plotly_chart(fig, use_container_width=True)
 
             st.subheader("Average Neuron Weights Evolution (Conceptual)")
-            # This requires actual time-series data for weights, which isn't in current dummy data.
-            # For a real implementation, HLN should log weight changes over iterations.
-            # Here, we'll plot average of final weights for each HLN.
             fig = px.bar(hln_df, x='endpoint_url', y='neuron_weights_avg', 
                             title='Average Neuron Weights per Endpoint (Proxy for Learning Progression)',
                             labels={'endpoint_url': 'Endpoint URL', 'neuron_weights_avg': 'Average Neuron Weight'})
@@ -316,7 +313,10 @@ def run_dashboard():
 
 # Example of how to populate DATA_FILE for dashboard demo
 if __name__ == "__main__":
-    # Create a dummy scan_results.json for testing the dashboard
+    # Initialize the database (create tables if they don't exist)
+    init_db()
+
+    # Create dummy scan data as per the previous example
     dummy_scan_data = {
         "target_url": "http://testphp.vulnweb.com",
         "visited_urls": [
@@ -328,10 +328,10 @@ if __name__ == "__main__":
             "http://testphp.vulnweb.com/signup.php"
         ],
         "discovered_endpoints": [
-            {"url": "http://testphp.vulnweb.com/login.php", "method": "POST", "params": [{"name": "username", "type": "text"}, {"name": "password", "type": "password"}], "type": "FORM"},
-            {"url": "http://testphp.vulnweb.com/search.php", "method": "GET", "params": [{"name": "query", "type": "text"}], "type": "FORM"},
-            {"url": "http://testphp.vulnweb.com/listproducts.php", "method": "GET", "params": [{"name": "cat", "type": "text"}], "type": "URL_PARAM"},
-            {"url": "http://testphp.vulnweb.com/api/v1/users", "method": "GET", "params": [], "type": "API_JS"}
+            {"url": "http://testphp.vulnweb.com/login.php", "method": "POST", "params": [{"name": "username", "type": "text"}, {"name": "password", "type": "password"}], "type": "FORM", "hash": helpers.hash_data({"url": "http://testphp.vulnweb.com/login.php", "method": "POST"})},
+            {"url": "http://testphp.vulnweb.com/search.php", "method": "GET", "params": [{"name": "query", "type": "text"}], "type": "FORM", "hash": helpers.hash_data({"url": "http://testphp.vulnweb.com/search.php", "method": "GET"})},
+            {"url": "http://testphp.vulnweb.com/listproducts.php", "method": "GET", "params": [{"name": "cat", "type": "text"}], "type": "URL_PARAM", "hash": helpers.hash_data({"url": "http://testphp.vulnweb.com/listproducts.php", "method": "GET", "params": [{"name": "cat", "type": "text"}]})},
+            {"url": "http://testphp.vulnweb.com/api/v1/users", "method": "GET", "params": [], "type": "API_JS", "hash": helpers.hash_data({"url": "http://testphp.vulnweb.com/api/v1/users", "method": "GET"})}
         ],
         "scan_results": [
             {
@@ -342,7 +342,8 @@ if __name__ == "__main__":
                 "criticality": "HIGH",
                 "proof": "Payload reflected without encoding.",
                 "explanation": "Cross-Site Scripting vulnerability.",
-                "recommendations": "Encode output."
+                "recommendations": "Encode output.",
+                "hash": helpers.hash_data({"url": "http://testphp.vulnweb.com/search.php", "vulnerability_type": "XSS", "payload": "<script>alert(document.cookie)</script>"})
             },
             {
                 "url": "http://testphp.vulnweb.com/listproducts.php",
@@ -352,16 +353,17 @@ if __name__ == "__main__":
                 "criticality": "CRITICAL",
                 "proof": "SQL error message detected.",
                 "explanation": "SQL Injection vulnerability.",
-                "recommendations": "Use prepared statements."
+                "recommendations": "Use prepared statements.",
+                "hash": helpers.hash_data({"url": "http://testphp.vulnweb.com/listproducts.php", "vulnerability_type": "SQLi", "payload": "' OR 1=1 --"})
             }
         ],
         "hln_stats": {
-            "endpoint_hash_1": {"url": "http://testphp.vulnweb.com/search.php", "successful_patterns_count": 3, "neuron_weights_avg": 0.75},
-            "endpoint_hash_2": {"url": "http://testphp.vulnweb.com/login.php", "successful_patterns_count": 1, "neuron_weights_avg": 0.5}
+            helpers.hash_data({"url": "http://testphp.vulnweb.com/search.php"}): {"url": "http://testphp.vulnweb.com/search.php", "successful_patterns_count": 3, "neuron_weights_avg": 0.75, "evolution_data": [[1, 0.3], [5, 0.5], [10, 0.7]]},
+            helpers.hash_data({"url": "http://testphp.vulnweb.com/login.php"}): {"url": "http://testphp.vulnweb.com/login.php", "successful_patterns_count": 1, "neuron_weights_avg": 0.5, "evolution_data": [[1, 0.2], [3, 0.4]]}
         }
     }
-    # Save the dummy data to the path specified in config
-    current_config = load_config()
-    save_data(dummy_scan_data)
-    print(f"Dummy scan data saved to {current_config['dashboard_settings']['data_file']}. Run `streamlit run reporting/dashboard.py` to view.")
+    
+    # Save the dummy data to the database
+    save_scan_data(dummy_scan_data)
+    print(f"Dummy scan data saved to database. Run `streamlit run reporting/dashboard.py` to view.")
     run_dashboard() # This will run the dashboard directly if this file is executed.
