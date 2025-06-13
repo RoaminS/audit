@@ -1,9 +1,18 @@
 # anonymity/tor_manager.py
 
 import time
-from stem import Signal
-from stem.control import Controller
-import requests
+import logging
+import httpx # Used for checking external IP via Tor SOCKS proxy
+
+try:
+    from stem import Signal
+    from stem.control import Controller
+    STEM_AVAILABLE = True
+except ImportError:
+    STEM_AVAILABLE = False
+    logging.error("Stem library not found. Tor functionality will be disabled. Install with 'pip install stem'")
+
+logger = logging.getLogger(__name__)
 
 class TorManager:
     def __init__(self, tor_port=9050, control_port=9051, password=None):
@@ -17,6 +26,15 @@ class TorManager:
                             Si non fourni, il est assumé que le contrôle est sans mot de passe
                             (ex: configuré via CookieAuthentication).
         """
+        if not STEM_AVAILABLE:
+            self.tor_port = None
+            self.control_port = None
+            self.password = None
+            self.controller = None
+            self.is_connected = False
+            logger.error("TorManager is not functional due to missing 'stem' library.")
+            return
+
         self.tor_port = tor_port
         self.control_port = control_port
         self.password = password
@@ -28,6 +46,9 @@ class TorManager:
         """
         Établit une connexion avec le port de contrôle de Tor.
         """
+        if not STEM_AVAILABLE or self.is_connected:
+            return self.is_connected
+
         try:
             self.controller = Controller.from_port(port=self.control_port)
             if self.password:
@@ -37,60 +58,76 @@ class TorManager:
                 try:
                     self.controller.authenticate()
                 except Exception as e:
-                    print(f"Avertissement: Impossible d'authentifier sans mot de passe. Assurez-vous que Tor est configuré pour CookieAuthentication ou pas d'authentification sur le port de contrôle. Erreur: {e}")
+                    logger.warning(f"Could not authenticate without password. Ensure Tor is configured for CookieAuthentication or no authentication on control port. Error: {e}")
 
             self.is_connected = True
-            print(f"Connecté au port de contrôle de Tor sur {self.control_port}")
+            logger.info(f"Connected to Tor control port on {self.control_port}")
+            return True
         except Exception as e:
             self.is_connected = False
-            print(f"Erreur de connexion au port de contrôle de Tor sur {self.control_port}: {e}")
+            logger.error(f"Error connecting to Tor control port on {self.control_port}: {e}")
+            return False
 
-    def renew_tor_ip(self):
+    async def renew_tor_ip(self):
         """
         Demande à Tor de changer son circuit et donc d'obtenir une nouvelle IP.
 
         Returns:
             bool: True si la rotation de l'IP a réussi, False sinon.
         """
+        if not STEM_AVAILABLE:
+            logger.error("Cannot renew Tor IP: 'stem' library is not available.")
+            return False
+
         if not self.is_connected:
-            self.connect() # Tente de se reconnecter si non connecté
+            self.connect() # Attempt to reconnect if not connected
             if not self.is_connected:
-                print("Impossible de renouveler l'IP: non connecté au port de contrôle de Tor.")
+                logger.error("Cannot renew IP: not connected to Tor control port.")
                 return False
 
         try:
-            print("Renouvellement de l'IP Tor...")
+            logger.info("Renewing Tor IP...")
             self.controller.signal(Signal.NEWNYM)
-            print("Signal NEWNYM envoyé. Attente de la nouvelle IP...")
-            time.sleep(self.controller.get_newnym_wait()) # Attendre le temps recommandé par Tor
-            print("Nouvelle IP Tor demandée.")
+            logger.info("NEWNYM signal sent. Waiting for new IP...")
+            # Use asyncio.sleep for non-blocking wait
+            await asyncio.sleep(self.controller.get_newnym_wait())
+            logger.info("New Tor IP requested.")
             return True
         except Exception as e:
-            print(f"Erreur lors du renouvellement de l'IP Tor: {e}")
+            logger.error(f"Error renewing Tor IP: {e}")
             return False
 
-    def get_current_external_ip(self):
+    async def get_current_external_ip(self):
         """
         Récupère l'adresse IP externe actuelle en utilisant Tor.
 
         Returns:
             str: L'adresse IP externe ou None en cas d'erreur.
         """
+        if not self.tor_port:
+            logger.warning("Tor SOCKS port not configured or stem not available. Cannot get IP via Tor.")
+            return None
+
         proxies = {
-            "http": f"socks5h://127.0.0.1:{self.tor_port}",
-            "https": f"socks5h://127.0.0.1:{self.tor_port}"
+            "http://": f"socks5h://127.0.0.1:{self.tor_port}",
+            "https://": f"socks5h://127.0.0.1:{self.tor_port}"
         }
         try:
-            response = requests.get('http://ipinfo.io/json', proxies=proxies, timeout=10)
-            if response.status_code == 200:
-                ip_info = response.json()
-                return ip_info.get('ip')
-            else:
-                print(f"Erreur: Statut {response.status_code} lors de la récupération de l'IP via Tor.")
-                return None
-        except requests.exceptions.RequestException as e:
-            print(f"Erreur lors de la récupération de l'IP via Tor: {e}")
+            async with httpx.AsyncClient(proxies=proxies, timeout=10) as client:
+                response = await client.get('http://ipinfo.io/json')
+                if response.status_code == 200:
+                    ip_info = response.json()
+                    return ip_info.get('ip')
+                else:
+                    logger.error(f"Error: Status {response.status_code} when getting IP via Tor.")
+                    return None
+        except httpx.RequestError as e:
+            logger.error(f"Error getting IP via Tor: {e}")
             return None
+        except Exception as e:
+            logger.error(f"An unexpected error occurred while getting IP via Tor: {e}")
+            return None
+
 
     def close(self):
         """
@@ -99,50 +136,41 @@ class TorManager:
         if self.controller:
             self.controller.close()
             self.is_connected = False
-            print("Connexion au contrôleur Tor fermée.")
+            logger.info("Tor controller connection closed.")
 
-    def __enter__(self):
+    async def __aenter__(self):
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
 if __name__ == '__main__':
-    print("Test du TorManager...")
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+    logger.info("Testing TorManager...")
 
-    # Assurez-vous que Tor est en cours d'exécution et que le port de contrôle (9051)
-    # est accessible. Si vous utilisez un mot de passe, modifiez la ligne suivante.
-    # Pour de nombreux setups, si vous configurez ControlPort avec CookieAuthentication,
-    # vous n'avez pas besoin de spécifier un mot de passe ici.
+    async def main():
+        # Ensure Tor is running and its control port (9051) is accessible.
+        # If you're using a password, replace 'your_tor_password' with it.
+        # For many setups, if you configure ControlPort with CookieAuthentication,
+        # you might not need to specify a password here.
+        tm = TorManager(password="your_tor_password") # Replace if you have a password, or remove.
 
-    # Exemple pour macOS/Linux (assurez-vous que le fichier de cookie est lisible par l'utilisateur)
-    # try:
-    #     with open("/opt/homebrew/var/lib/tor/control_auth_cookie", "rb") as f:
-    #         cookie = f.read()
-    #     # Si vous utilisez un cookie, authentification se fait via le cookie.
-    #     # La classe TorManager devrait être modifiée pour gérer l'authentification par cookie.
-    #     # Pour l'exemple simple, nous allons supposer soit pas de mot de passe soit un mot de passe simple.
-    # except FileNotFoundError:
-    #     print("Fichier de cookie d'authentification Tor non trouvé.")
-    #     print("Assurez-vous que Tor est configuré pour l'authentification par cookie ou par mot de passe.")
-    #     print("Pour le test, nous allons tenter sans mot de passe.")
-    #     # Pour tester sans mot de passe, vous devez avoir 'ControlPort 9051' et 'CookieAuthentication 0' ou 'HashedControlPassword ""'
-    #     # dans votre torrc (ce qui est déconseillé pour la production).
+        if tm.is_connected:
+            current_ip = await tm.get_current_external_ip()
+            print(f"\nCurrent IP via Tor: {current_ip}")
 
-    tm = TorManager() # Assurez-vous que Tor est en cours d'exécution et accessible
-
-    if tm.is_connected:
-        print(f"\nIP actuelle via Tor: {tm.get_current_external_ip()}")
-
-        print("\nTentative de renouvellement d'IP Tor...")
-        if tm.renew_tor_ip():
-            time.sleep(5) # Donner un peu de temps pour que Tor établisse le nouveau circuit
-            new_ip = tm.get_current_external_ip()
-            print(f"Nouvelle IP via Tor: {new_ip}")
+            print("\nAttempting to renew Tor IP...")
+            if await tm.renew_tor_ip():
+                # Give some time for Tor to establish the new circuit
+                await asyncio.sleep(5)
+                new_ip = await tm.get_current_external_ip()
+                print(f"New IP via Tor: {new_ip}")
+            else:
+                print("Failed to renew Tor IP.")
         else:
-            print("Échec du renouvellement de l'IP Tor.")
-    else:
-        print("Impossible de tester TorManager car la connexion a échoué.")
+            print("Cannot test TorManager as connection failed.")
 
-    tm.close()
-    print("\nTest du TorManager terminé.")
+        tm.close()
+        logger.info("TorManager test completed.")
+
+    asyncio.run(main())
