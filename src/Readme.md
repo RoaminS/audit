@@ -1,3 +1,5 @@
+```
+
 +--------------------------+     +------------------------+
 |    IP Rotation Module    |<--->|   Proxy/VPN Manager  |
 | (Anonymity & Evasion)    |     |                        |
@@ -43,6 +45,8 @@
 |     Reporting Module     |<--->|     Web Dashboard        |
 | (PDF Generation, Visuals)|     | (Streamlit, Real-time)   |
 +--------------------------+     +--------------------------+
+
+```
 
 
 src/
