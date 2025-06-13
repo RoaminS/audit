@@ -6,6 +6,9 @@ import json
 import logging
 import os
 from urllib.parse import urlparse # Correction: Ajout de l'import manquant
+from utils.database import init_db, load_scan_data_from_db, save_scan_data_to_db
+from utils import helpers # For hashing if needed
+
 
 logger = logging.getLogger(__name__)
 
