@@ -257,3 +257,9 @@ pip install -r requirements.txt
 
 Configurer le fichier 'src/config.py'
 
+Configurer le fichier 'proxies.txt'
+
+Puis lancer le scan: 
+```
+python main.py
+```
