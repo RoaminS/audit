@@ -9,32 +9,62 @@ import os
 import matplotlib.pyplot as plt
 import networkx as nx
 import logging
+import json # Added to load config
 
 logger = logging.getLogger(__name__)
 
+# --- Configuration Management (for default values if called directly) ---
+CONFIG_FILE = "reporting/config.json"
+
+def load_config_for_pdf_generator():
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, 'r') as f:
+            return json.load(f)
+    return { # Default values
+        "pdf_settings": {
+            "output_path": "reports",
+            "branding_logo": "assets/hebbscan_logo.png",
+            "default_report_filename": "HebbScan_Report.pdf",
+            "architecture_graph_figsize": [12, 10],
+            "vulnerability_map_figsize": [10, 6],
+            "learning_curves_figsize": [12, 6],
+            "graph_layout_k": 0.15,
+            "graph_layout_iterations": 20
+        }
+    }
+
 class PDFGenerator:
-    def __init__(self, output_path="reports", branding_logo=None):
-        self.output_path = output_path
+    def __init__(self, output_path=None, branding_logo=None):
+        # Load config only if paths are not provided (when called directly, not from dashboard)
+        if output_path is None or branding_logo is None:
+            default_config = load_config_for_pdf_generator()['pdf_settings']
+            self.output_path = output_path if output_path is not None else default_config['output_path']
+            self.branding_logo = branding_logo if branding_logo is not None else default_config['branding_logo']
+        else:
+            self.output_path = output_path
+            self.branding_logo = branding_logo # Path to a logo image
+
         os.makedirs(self.output_path, exist_ok=True)
-        self.branding_logo = branding_logo # Path to a logo image
         self.styles = getSampleStyleSheet()
         self.styles.add(ParagraphStyle(name='H1', fontSize=24, leading=28, alignment=TA_CENTER, spaceAfter=20))
         self.styles.add(ParagraphStyle(name='H2', fontSize=18, leading=22, spaceAfter=14))
         self.styles.add(ParagraphStyle(name='H3', fontSize=14, leading=18, spaceAfter=10))
         self.styles.add(ParagraphStyle(name='Normal', fontSize=10, leading=12, spaceAfter=6))
         self.styles.add(ParagraphStyle(name='Code', fontName='Courier', fontSize=9, leading=10, spaceAfter=4, backColor=colors.lightgrey))
+        
+        # Store graph parameters initialized in generate_report
+        self.graph_params = {} 
 
-    def _generate_architecture_graph(self, visited_urls, discovered_endpoints, filename="architecture_map.png"):
+    def _generate_architecture_graph(self, visited_urls, discovered_endpoints, target_base_url, filename="architecture_map.png"):
         G = nx.DiGraph()
         nodes = set()
-        edges = set()
-
+        
         # Add URLs as nodes
         for url in visited_urls:
             G.add_node(url, type='URL')
             nodes.add(url)
         
-        # Add endpoints and their connections
+        # Add discovered endpoints and their connections
         for endpoint in discovered_endpoints:
             ep_url = endpoint['url']
             ep_method = endpoint['method']
@@ -45,13 +75,12 @@ class PDFGenerator:
                 nodes.add(ep_url)
             
             # For simplicity, connect the base URL to discovered endpoints if they are different
-            # More complex logic: connect forms/APIs to the page they were found on
-            if ep_url != self.target_base_url: # Assume target_base_url is passed or stored
-                 G.add_edge(self.target_base_url, ep_url, label=f"Discovered ({ep_method})")
+            if target_base_url in G and ep_url in G and ep_url != target_base_url: 
+                G.add_edge(target_base_url, ep_url, label=f"Discovered ({ep_method})")
 
 
-        plt.figure(figsize=(12, 10))
-        pos = nx.spring_layout(G, k=0.15, iterations=20) # Positions for nodes
+        plt.figure(figsize=self.graph_params.get('architecture_graph_figsize', (12, 10)))
+        pos = nx.spring_layout(G, k=self.graph_params.get('graph_layout_k', 0.15), iterations=self.graph_params.get('graph_layout_iterations', 20)) # Positions for nodes
         
         node_colors = []
         for node in G.nodes():
@@ -74,15 +103,11 @@ class PDFGenerator:
         
         filepath = os.path.join(self.output_path, filename)
         plt.savefig(filepath, bbox_inches='tight')
-        plt.close()
+        plt.close() # Close the figure to free memory
         logger.info(f"Generated architecture graph: {filepath}")
         return filepath
 
     def _generate_vulnerability_map(self, vulnerabilities, filename="vulnerability_map.png"):
-        # This is a very simplified example. A real vulnerability map might show
-        # vulnerabilities overlaid on the architecture, or a dependency graph of impact.
-        # For this demo, a simple bar chart of vulnerabilities by type/criticality.
-
         if not vulnerabilities:
             logger.warning("No vulnerabilities to map.")
             return None
@@ -95,7 +120,7 @@ class PDFGenerator:
         types = list(vuln_counts.keys())
         counts = list(vuln_counts.values())
 
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=self.graph_params.get('vulnerability_map_figsize', (10, 6)))
         plt.bar(types, counts, color='lightcoral')
         plt.xlabel("Vulnerability Type")
         plt.ylabel("Number of Findings")
@@ -105,7 +130,7 @@ class PDFGenerator:
 
         filepath = os.path.join(self.output_path, filename)
         plt.savefig(filepath, bbox_inches='tight')
-        plt.close()
+        plt.close() # Close the figure to free memory
         logger.info(f"Generated vulnerability map: {filepath}")
         return filepath
     
@@ -114,18 +139,29 @@ class PDFGenerator:
             logger.warning("No HLN stats to plot.")
             return None
         
-        plt.figure(figsize=(12, 6))
+        plt.figure(figsize=self.graph_params.get('learning_curves_figsize', (12, 6)))
         
+        # Collect data for plotting to avoid multiple `plt.plot` calls if some `evolution_data` is missing
+        plot_data = []
+        bar_data = []
+
         for ep_hash, stats in hln_stats.items():
-            # For a real learning curve, we'd need historical data (e.g., success rate over time/iterations)
-            # This example just plots a static point, but illustrates the idea.
-            # Assume 'evolution_data' contains [(iteration, success_rate)]
             if 'evolution_data' in stats and stats['evolution_data']:
                 iterations = [item[0] for item in stats['evolution_data']]
                 success_rates = [item[1] for item in stats['evolution_data']]
-                plt.plot(iterations, success_rates, label=f"HLN for {stats['url']}")
-            else: # Placeholder: if no historical data, just show current success count
-                plt.bar(stats['url'][:20] + '...', stats['successful_patterns_count'], label=f"Successful Patterns: {stats['url']}")
+                plot_data.append({'x': iterations, 'y': success_rates, 'label': f"HLN for {stats['url']}"})
+            else:
+                bar_data.append({'x': stats['url'][:20] + '...', 'y': stats['successful_patterns_count'], 'label': f"Successful Patterns: {stats['url']}"})
+
+        if plot_data:
+            for item in plot_data:
+                plt.plot(item['x'], item['y'], label=item['label'])
+        elif bar_data: # Fallback to bar chart if only static data is available
+            bar_labels = [item['x'] for item in bar_data]
+            bar_counts = [item['y'] for item in bar_data]
+            plt.bar(bar_labels, bar_counts)
+            plt.ylabel("Successful Pattern Count")
+
 
         plt.xlabel("Iteration / Endpoint")
         plt.ylabel("Success Rate / Pattern Count")
@@ -137,13 +173,20 @@ class PDFGenerator:
 
         filepath = os.path.join(self.output_path, filename)
         plt.savefig(filepath, bbox_inches='tight')
-        plt.close()
+        plt.close() # Close the figure to free memory
         logger.info(f"Generated learning curves: {filepath}")
         return filepath
 
 
-    def generate_report(self, target_url, scan_results, architecture_data, hln_stats, output_filename="HebbScan_Report.pdf"):
-        self.target_base_url = target_url # Store for architecture graph
+    def generate_report(self, target_url, scan_results, architecture_data, hln_stats, output_filename="HebbScan_Report.pdf", graph_params=None):
+        self.target_base_url = target_url # Store for architecture graph (or pass directly)
+        
+        # Store graph parameters passed from the dashboard
+        if graph_params:
+            self.graph_params = graph_params
+        else: # Load defaults if called directly without params
+            self.graph_params = load_config_for_pdf_generator()['pdf_settings'] 
+
         filepath = os.path.join(self.output_path, output_filename)
         doc = SimpleDocTemplate(filepath, pagesize=A4)
         story = []
@@ -200,8 +243,9 @@ class PDFGenerator:
         story.append(Paragraph("2. Scanned Architecture", self.styles['H2']))
         story.append(Paragraph(f"HebbScan successfully crawled and mapped {len(architecture_data['visited_urls'])} unique URLs and identified {len(architecture_data['discovered_endpoints'])} potential attack endpoints on the target website.", self.styles['Normal']))
         
-        arch_graph_path = self._generate_architecture_graph(architecture_data['visited_urls'], architecture_data['discovered_endpoints'])
-        if arch_graph_path:
+        # Pass target_url to _generate_architecture_graph
+        arch_graph_path = self._generate_architecture_graph(architecture_data['visited_urls'], architecture_data['discovered_endpoints'], target_url)
+        if arch_graph_path and os.path.exists(arch_graph_path):
             story.append(Spacer(1, 12))
             story.append(Paragraph("Reconstituted Website Architecture Map:", self.styles['Normal']))
             img = Image(arch_graph_path)
@@ -209,6 +253,9 @@ class PDFGenerator:
             img.drawHeight = img.drawWidth * (img.height / img.width) # Maintain aspect ratio
             story.append(img)
             story.append(Spacer(1, 24))
+        else:
+            story.append(Paragraph("No architecture graph could be generated or found.", self.styles['Normal']))
+
         story.append(PageBreak())
 
         # 3. Attack Surface Analysis
@@ -217,9 +264,13 @@ class PDFGenerator:
         
         if architecture_data['discovered_endpoints']:
             data = [['URL', 'Method', 'Type', 'Parameters (Example)']]
+            # Use Paragraph for content in cells to enable wrapping for long URLs/params
             for ep in architecture_data['discovered_endpoints']:
                 params_str = ", ".join([f"{p['name']}:{p['type']}" for p in ep['params']])
-                data.append([ep['url'], ep['method'], ep['type'], params_str])
+                data.append([Paragraph(ep['url'], self.styles['Normal']), 
+                             Paragraph(ep['method'], self.styles['Normal']), 
+                             Paragraph(ep['type'], self.styles['Normal']), 
+                             Paragraph(params_str, self.styles['Normal'])])
             
             table_style = TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
@@ -232,7 +283,6 @@ class PDFGenerator:
                 ('FONTSIZE', (0, 0), (-1, -1), 8),
             ])
             
-            # Auto-calculate column widths. Need to be careful with long URLs.
             col_widths = [doc.width * 0.35, doc.width * 0.1, doc.width * 0.15, doc.width * 0.4]
             t = Table(data, colWidths=col_widths)
             t.setStyle(table_style)
@@ -246,7 +296,7 @@ class PDFGenerator:
         story.append(Paragraph("4. Vulnerability Findings", self.styles['H2']))
         if scan_results:
             vuln_map_path = self._generate_vulnerability_map(scan_results)
-            if vuln_map_path:
+            if vuln_map_path and os.path.exists(vuln_map_path):
                 story.append(Spacer(1, 12))
                 story.append(Paragraph("Overview of Detected Vulnerabilities by Type:", self.styles['Normal']))
                 img = Image(vuln_map_path)
@@ -254,6 +304,9 @@ class PDFGenerator:
                 img.drawHeight = img.drawWidth * (img.height / img.width)
                 story.append(img)
                 story.append(Spacer(1, 24))
+            else:
+                story.append(Paragraph("No vulnerability map could be generated or found.", self.styles['Normal']))
+
 
             for i, vuln in enumerate(scan_results):
                 story.append(Paragraph(f"4.{i+1}. {vuln.get('vulnerability_type')} - {vuln.get('criticality')} Severity", self.styles['H3']))
@@ -279,7 +332,7 @@ class PDFGenerator:
         story.append(Paragraph("The Hebbian Learning Networks continuously adapted their attack patterns throughout the scan. The following charts illustrate their evolution:", self.styles['Normal']))
         
         hln_curve_path = self._generate_learning_curves(hln_stats)
-        if hln_curve_path:
+        if hln_curve_path and os.path.exists(hln_curve_path):
             story.append(Spacer(1, 12))
             story.append(Paragraph("Evolution of Hebbian Learning Networks (Sample):", self.styles['Normal']))
             img = Image(hln_curve_path)
@@ -361,22 +414,36 @@ if __name__ == "__main__":
         'endpoint_hash_2': {'url': 'http://testphp.vulnweb.com/login.php', 'successful_patterns_count': 1, 'neuron_weights_avg': 0.5, 'evolution_data': [(1, 0.05), (2, 0.1), (3, 0.1), (4, 0.2), (5, 0.5)]},
     }
 
-    generator = PDFGenerator(branding_logo="path/to/your/logo.png") # Replace with a real path if you have one
-    # If logo.png doesn't exist, it will simply be skipped.
-    
+    # Use a relative path for the dummy logo as well
+    logo_path = "assets/hebbscan_logo_dummy.png"
+    # Create a dummy assets directory if it doesn't exist
+    os.makedirs("assets", exist_ok=True)
     # Create a dummy logo file for testing
     try:
         from PIL import Image as PILImage
-        img = PILImage.new('RGB', (60, 30), color = 'red')
-        img.save("path/to/your/logo.png")
-        print("Dummy logo created at path/to/your/logo.png")
+        img = PILImage.new('RGB', (200, 200), color = 'darkblue') # Create a blue square image
+        img.save(logo_path)
+        print(f"Dummy logo saved to {logo_path}")
     except ImportError:
-        print("Pillow not installed. Cannot create dummy logo. Install with 'pip install Pillow'")
+        print("PIL (Pillow) not installed. Cannot create dummy logo. Install with 'pip install Pillow'.")
+        logo_path = None # Ensure logo_path is None if Pillow is not available
 
-    asyncio.run(generator.generate_report(
+    generator = PDFGenerator(branding_logo=logo_path) 
+    
+    # Pass graph parameters from the test config to generate_report
+    test_config = load_config_for_pdf_generator()['pdf_settings']
+
+    generator.generate_report(
         target_url="http://testphp.vulnweb.com",
         scan_results=dummy_scan_results,
         architecture_data=dummy_architecture_data,
         hln_stats=dummy_hln_stats,
-        output_filename="HebbScan_Demo_Report.pdf"
-    ))
+        output_filename="HebbScan_Report_Test.pdf",
+        graph_params={
+            "architecture_graph_figsize": tuple(test_config['architecture_graph_figsize']),
+            "vulnerability_map_figsize": tuple(test_config['vulnerability_map_figsize']),
+            "learning_curves_figsize": tuple(test_config['learning_curves_figsize']),
+            "graph_layout_k": test_config['graph_layout_k'],
+            "graph_layout_iterations": test_config['graph_layout_iterations']
+        }
+    )
