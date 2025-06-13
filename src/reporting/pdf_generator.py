@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import logging
 import json # Added to load config
+from urllib.parse import urlparse # Added for base URL extraction
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,15 @@ CONFIG_FILE = "reporting/config.json"
 def load_config_for_pdf_generator():
     if os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, 'r') as f:
-            return json.load(f)
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                logger.error(f"Error decoding JSON from {CONFIG_FILE}. Returning default config.")
+                # Fallback to default if config file is corrupted
+                return get_default_pdf_config()
+    return get_default_pdf_config()
+
+def get_default_pdf_config():
     return { # Default values
         "pdf_settings": {
             "output_path": "reports",
@@ -141,34 +150,42 @@ class PDFGenerator:
         
         plt.figure(figsize=self.graph_params.get('learning_curves_figsize', (12, 6)))
         
-        # Collect data for plotting to avoid multiple `plt.plot` calls if some `evolution_data` is missing
         plot_data = []
         bar_data = []
 
         for ep_hash, stats in hln_stats.items():
-            if 'evolution_data' in stats and stats['evolution_data']:
-                iterations = [item[0] for item in stats['evolution_data']]
-                success_rates = [item[1] for item in stats['evolution_data']]
+            # Ensure 'evolution_data' is a list (it's stored as JSON string in DB)
+            evolution_data = json.loads(stats.get('evolution_data', '[]'))
+            
+            if evolution_data:
+                iterations = [item[0] for item in evolution_data]
+                success_rates = [item[1] for item in evolution_data]
                 plot_data.append({'x': iterations, 'y': success_rates, 'label': f"HLN for {stats['url']}"})
             else:
+                # Fallback to bar chart for successful patterns if no evolution data
                 bar_data.append({'x': stats['url'][:20] + '...', 'y': stats['successful_patterns_count'], 'label': f"Successful Patterns: {stats['url']}"})
 
         if plot_data:
             for item in plot_data:
                 plt.plot(item['x'], item['y'], label=item['label'])
+            plt.xlabel("Iteration")
+            plt.ylabel("Success Rate")
+            plt.legend()
+            plt.grid(True)
         elif bar_data: # Fallback to bar chart if only static data is available
             bar_labels = [item['x'] for item in bar_data]
             bar_counts = [item['y'] for item in bar_data]
             plt.bar(bar_labels, bar_counts)
+            plt.xlabel("Endpoint / HLN Instance")
             plt.ylabel("Successful Pattern Count")
+            plt.xticks(rotation=45, ha='right')
+        else:
+            logger.warning("No suitable data found in HLN stats for plotting learning curves.")
+            plt.close() # Close empty figure
+            return None
 
 
-        plt.xlabel("Iteration / Endpoint")
-        plt.ylabel("Success Rate / Pattern Count")
         plt.title("Evolution of Hebbian Learning Networks")
-        plt.legend()
-        plt.grid(True)
-        plt.xticks(rotation=45, ha='right')
         plt.tight_layout()
 
         filepath = os.path.join(self.output_path, filename)
@@ -210,7 +227,7 @@ class PDFGenerator:
         story.append(Paragraph("Table of Contents", self.styles['H2']))
         story.append(Paragraph("1. Executive Summary", self.styles['Normal']))
         story.append(Paragraph("2. Scanned Architecture", self.styles['Normal']))
-        story.append(Paragraph("3. Attack Surface Analysis", self.styles['Normal']))
+        story.append(Paragraph("3. Attack Surface Analysis", self.styles['Normal'])) # This was implicitly in architecture, now explicit
         story.append(Paragraph("4. Vulnerability Findings", self.styles['Normal']))
         story.append(Paragraph("5. Hebbian Learning Evolution", self.styles['Normal']))
         story.append(PageBreak())
@@ -241,209 +258,210 @@ class PDFGenerator:
 
         # 2. Scanned Architecture
         story.append(Paragraph("2. Scanned Architecture", self.styles['H2']))
-        story.append(Paragraph(f"HebbScan successfully crawled and mapped {len(architecture_data['visited_urls'])} unique URLs and identified {len(architecture_data['discovered_endpoints'])} potential attack endpoints on the target website.", self.styles['Normal']))
+        story.append(Paragraph(f"HebbScan successfully crawled and mapped {len(architecture_data['visited_urls'])} unique URLs on the target website.", self.styles['Normal']))
         
-        # Pass target_url to _generate_architecture_graph
-        arch_graph_path = self._generate_architecture_graph(architecture_data['visited_urls'], architecture_data['discovered_endpoints'], target_url)
-        if arch_graph_path and os.path.exists(arch_graph_path):
-            story.append(Spacer(1, 12))
-            story.append(Paragraph("Reconstituted Website Architecture Map:", self.styles['Normal']))
-            img = Image(arch_graph_path)
-            img.drawWidth = A4[0] - 2 * doc.leftMargin
-            img.drawHeight = img.drawWidth * (img.height / img.width) # Maintain aspect ratio
-            story.append(img)
-            story.append(Spacer(1, 24))
-        else:
-            story.append(Paragraph("No architecture graph could be generated or found.", self.styles['Normal']))
+        # Base URL extraction from target_url
+        parsed_target_url = urlparse(target_url)
+        target_base_url = f"{parsed_target_url.scheme}://{parsed_target_url.netloc}"
 
+        arch_graph_path = self._generate_architecture_graph(architecture_data['visited_urls'], architecture_data['discovered_endpoints'], target_base_url)
+        if arch_graph_path:
+            story.append(Image(arch_graph_path, width=400, height=300)) # Adjust size as needed
+            story.append(Paragraph("<i>Figure 1: Reconstituted Website Architecture</i>", self.styles['Normal']))
+            story.append(Spacer(1, 12))
+        else:
+            story.append(Paragraph("<i>No architecture graph could be generated due to insufficient data.</i>", self.styles['Normal']))
         story.append(PageBreak())
 
         # 3. Attack Surface Analysis
         story.append(Paragraph("3. Attack Surface Analysis", self.styles['H2']))
-        story.append(Paragraph("The following table summarizes the key attack surface elements identified during the reconnaissance phase:", self.styles['Normal']))
-        
+        story.append(Paragraph(f"A total of {len(architecture_data['discovered_endpoints'])} potential attack endpoints were identified.", self.styles['Normal']))
         if architecture_data['discovered_endpoints']:
-            data = [['URL', 'Method', 'Type', 'Parameters (Example)']]
-            # Use Paragraph for content in cells to enable wrapping for long URLs/params
+            endpoint_data = [['URL', 'Method', 'Type', 'Parameters']]
             for ep in architecture_data['discovered_endpoints']:
-                params_str = ", ".join([f"{p['name']}:{p['type']}" for p in ep['params']])
-                data.append([Paragraph(ep['url'], self.styles['Normal']), 
-                             Paragraph(ep['method'], self.styles['Normal']), 
-                             Paragraph(ep['type'], self.styles['Normal']), 
-                             Paragraph(params_str, self.styles['Normal'])])
+                # Ensure parameters are in a readable format, e.g., JSON string or simplified
+                params_display = json.dumps(ep.get('params', [])) if ep.get('params') else 'N/A'
+                endpoint_data.append([ep.get('url', 'N/A'), ep.get('method', 'N/A'), ep.get('type', 'UNKNOWN'), params_display])
             
-            table_style = TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                ('FONTSIZE', (0, 0), (-1, -1), 8),
-            ])
-            
-            col_widths = [doc.width * 0.35, doc.width * 0.1, doc.width * 0.15, doc.width * 0.4]
-            t = Table(data, colWidths=col_widths)
-            t.setStyle(table_style)
-            story.append(t)
+            table = Table(endpoint_data)
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#212121')), # Dark background for header
+                ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke), # White text for header
+                ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('BOTTOMPADDING', (0,0), (-1,0), 12),
+                ('BACKGROUND', (0,1), (-1,-1), colors.beige),
+                ('GRID', (0,0), (-1,-1), 1, colors.black),
+                ('FONTSIZE', (0,0), (-1,-1), 8), # Smaller font for table content
+                ('WORDWRAP', (0,0), (-1,-1), 'LTR'), # Ensure text wraps
+            ]))
+            story.append(table)
         else:
-            story.append(Paragraph("No specific attack surface endpoints identified.", self.styles['Normal']))
-        
+            story.append(Paragraph("<i>No specific attack surface endpoints identified.</i>", self.styles['Normal']))
         story.append(PageBreak())
+
 
         # 4. Vulnerability Findings
         story.append(Paragraph("4. Vulnerability Findings", self.styles['H2']))
         if scan_results:
             vuln_map_path = self._generate_vulnerability_map(scan_results)
-            if vuln_map_path and os.path.exists(vuln_map_path):
+            if vuln_map_path:
+                story.append(Image(vuln_map_path, width=400, height=250)) # Adjust size
+                story.append(Paragraph("<i>Figure 2: Vulnerabilities by Type</i>", self.styles['Normal']))
                 story.append(Spacer(1, 12))
-                story.append(Paragraph("Overview of Detected Vulnerabilities by Type:", self.styles['Normal']))
-                img = Image(vuln_map_path)
-                img.drawWidth = A4[0] - 2 * doc.leftMargin
-                img.drawHeight = img.drawWidth * (img.height / img.width)
-                story.append(img)
-                story.append(Spacer(1, 24))
-            else:
-                story.append(Paragraph("No vulnerability map could be generated or found.", self.styles['Normal']))
-
-
-            for i, vuln in enumerate(scan_results):
-                story.append(Paragraph(f"4.{i+1}. {vuln.get('vulnerability_type')} - {vuln.get('criticality')} Severity", self.styles['H3']))
-                story.append(Paragraph(f"<b>URL:</b> {vuln.get('url')}", self.styles['Normal']))
-                story.append(Paragraph(f"<b>Method:</b> {vuln.get('method')}", self.styles['Normal']))
-                story.append(Paragraph("<b>Payload (Proof of Concept):</b>", self.styles['Normal']))
-                story.append(Paragraph(f"{vuln.get('payload')}", self.styles['Code']))
-                story.append(Paragraph("<b>Explanation:</b>", self.styles['Normal']))
-                story.append(Paragraph(f"{vuln.get('explanation')}", self.styles['Normal']))
-                story.append(Paragraph("<b>Proof:</b>", self.styles['Normal']))
-                story.append(Paragraph(f"{vuln.get('proof')}", self.styles['Normal']))
-                story.append(Paragraph("<b>Recommendations:</b>", self.styles['Normal']))
-                story.append(Paragraph(f"{vuln.get('recommendations')}", self.styles['Normal']))
-                story.append(Spacer(1, 12))
-                if i < len(scan_results) - 1:
-                    story.append(Spacer(1, 6)) # Small space between findings
+            
+            story.append(Paragraph("The following vulnerabilities were identified during the scan:", self.styles['Normal']))
+            
+            # Group vulnerabilities by criticality for better readability
+            criticalities = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
+            for criticality in criticalities:
+                vulns_of_criticality = [v for v in scan_results if v.get('criticality') == criticality]
+                if vulns_of_criticality:
+                    story.append(Paragraph(f"Criticality: {criticality.upper()}", self.styles['H3']))
+                    for vuln in vulns_of_criticality:
+                        story.append(Paragraph(f"<b>Type:</b> {vuln.get('vulnerability_type', 'N/A')}", self.styles['Normal']))
+                        story.append(Paragraph(f"<b>URL:</b> {vuln.get('url', 'N/A')}", self.styles['Normal']))
+                        story.append(Paragraph(f"<b>Method:</b> {vuln.get('method', 'N/A')}", self.styles['Normal']))
+                        if vuln.get('payload'):
+                            story.append(Paragraph(f"<b>Payload:</b>", self.styles['Normal']))
+                            story.append(Paragraph(vuln['payload'], self.styles['Code']))
+                        story.append(Paragraph(f"<b>Explanation:</b> {vuln.get('explanation', 'N/A')}", self.styles['Normal']))
+                        if vuln.get('proof'):
+                            story.append(Paragraph(f"<b>Proof:</b>", self.styles['Normal']))
+                            story.append(Paragraph(vuln['proof'], self.styles['Code']))
+                        story.append(Paragraph(f"<b>Recommendations:</b> {vuln.get('recommendations', 'N/A')}", self.styles['Normal']))
+                        story.append(Spacer(1, 12))
         else:
-            story.append(Paragraph("No vulnerabilities were detected during this scan.", self.styles['Normal']))
+            story.append(Paragraph("<i>No vulnerabilities were detected in the scan.</i>", self.styles['Normal']))
         story.append(PageBreak())
 
         # 5. Hebbian Learning Evolution
         story.append(Paragraph("5. Hebbian Learning Evolution", self.styles['H2']))
-        story.append(Paragraph("The Hebbian Learning Networks continuously adapted their attack patterns throughout the scan. The following charts illustrate their evolution:", self.styles['Normal']))
-        
-        hln_curve_path = self._generate_learning_curves(hln_stats)
-        if hln_curve_path and os.path.exists(hln_curve_path):
+        if hln_stats:
+            story.append(Paragraph("The Hebbian Learning Network (HLN) adaptively generated and refined attack patterns. Here's a summary of its evolution:", self.styles['Normal']))
+            
+            learning_curves_path = self._generate_learning_curves(hln_stats)
+            if learning_curves_path:
+                story.append(Image(learning_curves_path, width=500, height=250)) # Adjust size
+                story.append(Paragraph("<i>Figure 3: HLN Evolution (Successful Patterns / Success Rate Over Iterations)</i>", self.styles['Normal']))
+                story.append(Spacer(1, 12))
+
+            story.append(Paragraph("Key statistics for each HLN instance:", self.styles['Normal']))
+            hln_table_data = [['Endpoint URL', 'Successful Patterns', 'Avg. Neuron Weights', 'Evolution Data']]
+            for hln_hash, stats in hln_stats.items():
+                # Display evolution_data as a simplified string or indicate presence
+                evolution_summary = "Available" if json.loads(stats.get('evolution_data', '[]')) else "N/A"
+                hln_table_data.append([
+                    stats.get('url', 'N/A'),
+                    str(stats.get('successful_patterns_count', 0)),
+                    f"{stats.get('neuron_weights_avg', 0.0):.2f}",
+                    evolution_summary
+                ])
+            
+            hln_table = Table(hln_table_data, colWidths=[200, 100, 100, 80]) # Adjust colWidths as needed
+            hln_table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#212121')),
+                ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+                ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('BOTTOMPADDING', (0,0), (-1,0), 12),
+                ('BACKGROUND', (0,1), (-1,-1), colors.lightgrey),
+                ('GRID', (0,0), (-1,-1), 1, colors.black),
+                ('FONTSIZE', (0,0), (-1,-1), 8),
+                ('WORDWRAP', (0,0), (-1,-1), 'LTR'),
+            ]))
+            story.append(hln_table)
             story.append(Spacer(1, 12))
-            story.append(Paragraph("Evolution of Hebbian Learning Networks (Sample):", self.styles['Normal']))
-            img = Image(hln_curve_path)
-            img.drawWidth = A4[0] - 2 * doc.leftMargin
-            img.drawHeight = img.drawWidth * (img.height / img.width)
-            story.append(img)
-            story.append(Spacer(1, 24))
+            story.append(Paragraph("<i>Note: 'Evolution Data' indicates if time-series data for learning progression is available.</i>", self.styles['Normal']))
+
         else:
-            story.append(Paragraph("No Hebbian learning evolution data available for visualization.", self.styles['Normal']))
+            story.append(Paragraph("<i>No Hebbian Learning Network statistics available for this scan.</i>", self.styles['Normal']))
 
-        story.append(PageBreak())
+        # Build the PDF
+        doc.build(story)
+        logger.info(f"PDF report generated at: {filepath}")
+        return filepath
 
-        # End of Report
-        story.append(Paragraph("--- End of Report ---", self.styles['Normal']))
-
-        try:
-            doc.build(story)
-            logger.info(f"PDF report generated successfully at: {filepath}")
-        except Exception as e:
-            logger.error(f"Error generating PDF report: {e}")
-
-# Example Usage (for testing)
+# Example usage for standalone PDF generation
 if __name__ == "__main__":
-    logger.setLevel(logging.INFO)
-    logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s')
+    # Configure logging for standalone run
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-    # Dummy Data for Report Generation
-    dummy_scan_results = [
-        {
-            'url': 'http://testphp.vulnweb.com/search.php?query=test',
-            'method': 'GET',
-            'vulnerability_type': 'XSS',
-            'payload': '<script>alert(document.cookie)</script>',
-            'criticality': 'HIGH',
-            'proof': "The payload was reflected in the HTML response without proper encoding, executing JavaScript in the browser.",
-            'explanation': "The web application is vulnerable to Cross-Site Scripting (XSS), allowing attackers to inject malicious scripts into web pages viewed by other users.",
-            'recommendations': "Implement proper input validation and output encoding (e.g., HTML entity encoding) for all user-supplied data before rendering it in the browser."
-        },
-        {
-            'url': 'http://testphp.vulnweb.com/listproducts.php?cat=1',
-            'method': 'GET',
-            'vulnerability_type': 'SQLi',
-            'payload': "' OR 1=1 --",
-            'criticality': 'CRITICAL',
-            'proof': "The page displayed a database error message: 'You have an error in your SQL syntax...' after injecting the payload, indicating direct database interaction.",
-            'explanation': "The application is vulnerable to SQL Injection, enabling attackers to execute arbitrary SQL queries, potentially leading to data exfiltration or manipulation.",
-            'recommendations': "Use parameterized queries (prepared statements) or Object-Relational Mappers (ORMs) to prevent SQL injection. Avoid concatenating user input directly into SQL queries."
-        },
-        {
-            'url': 'http://testphp.vulnweb.com/login.php',
-            'method': 'POST',
-            'vulnerability_type': 'Auth Bypass',
-            'payload': "username=' OR '1'='1'--&password=any",
-            'criticality': 'HIGH',
-            'proof': "Successfully logged in as administrator using the crafted payload, bypassing authentication mechanisms.",
-            'explanation': "The authentication logic is flawed, allowing unauthorized access by manipulating login credentials.",
-            'recommendations': "Strengthen authentication mechanisms. Implement robust password hashing, multi-factor authentication, and secure session management. Validate and sanitize all login inputs."
-        }
-    ]
+    # Load dummy data for standalone test (should be consistent with database schema)
+    # Note: When run via dashboard, data comes from DB. For standalone test, you can mock it.
+    # If you want to load from DB for standalone test, uncomment the database imports and load function.
+    from utils.database import init_db, load_scan_data_from_db
+    from utils import helpers
 
-    dummy_architecture_data = {
-        'visited_urls': [
-            'http://testphp.vulnweb.com/',
-            'http://testphp.vulnweb.com/login.php',
-            'http://testphp.vulnweb.com/search.php',
-            'http://testphp.vulnweb.com/listproducts.php?cat=1',
-            'http://testphp.vulnweb.com/artists.php',
-            'http://testphp.vulnweb.com/signup.php'
+    init_db() # Ensure DB is initialized for loading
+
+    # Populate dummy data and save to DB
+    dummy_scan_data = {
+        "target_url": "http://testphp.vulnweb.com",
+        "visited_urls": [
+            "http://testphp.vulnweb.com/",
+            "http://testphp.vulnweb.com/login.php",
+            "http://testphp.vulnweb.com/search.php",
+            "http://testphp.vulnweb.com/listproducts.php?cat=1",
+            "http://testphp.vulnweb.com/artists.php",
+            "http://testphp.vulnweb.com/signup.php"
         ],
-        'discovered_endpoints': [
-            {'url': 'http://testphp.vulnweb.com/login.php', 'method': 'POST', 'params': [{'name': 'username', 'type': 'text'}, {'name': 'password', 'type': 'password'}], 'type': 'FORM'},
-            {'url': 'http://testphp.vulnweb.com/search.php', 'method': 'GET', 'params': [{'name': 'query', 'type': 'text'}], 'type': 'FORM'},
-            {'url': 'http://testphp.vulnweb.com/listproducts.php', 'method': 'GET', 'params': [{'name': 'cat', 'type': 'text'}], 'type': 'URL_PARAM'},
-        ]
-    }
-
-    dummy_hln_stats = {
-        'endpoint_hash_1': {'url': 'http://testphp.vulnweb.com/search.php', 'successful_patterns_count': 3, 'neuron_weights_avg': 0.75, 'evolution_data': [(1, 0.1), (2, 0.3), (3, 0.6), (4, 0.7), (5, 0.8)]},
-        'endpoint_hash_2': {'url': 'http://testphp.vulnweb.com/login.php', 'successful_patterns_count': 1, 'neuron_weights_avg': 0.5, 'evolution_data': [(1, 0.05), (2, 0.1), (3, 0.1), (4, 0.2), (5, 0.5)]},
-    }
-
-    # Use a relative path for the dummy logo as well
-    logo_path = "assets/hebbscan_logo_dummy.png"
-    # Create a dummy assets directory if it doesn't exist
-    os.makedirs("assets", exist_ok=True)
-    # Create a dummy logo file for testing
-    try:
-        from PIL import Image as PILImage
-        img = PILImage.new('RGB', (200, 200), color = 'darkblue') # Create a blue square image
-        img.save(logo_path)
-        print(f"Dummy logo saved to {logo_path}")
-    except ImportError:
-        print("PIL (Pillow) not installed. Cannot create dummy logo. Install with 'pip install Pillow'.")
-        logo_path = None # Ensure logo_path is None if Pillow is not available
-
-    generator = PDFGenerator(branding_logo=logo_path) 
-    
-    # Pass graph parameters from the test config to generate_report
-    test_config = load_config_for_pdf_generator()['pdf_settings']
-
-    generator.generate_report(
-        target_url="http://testphp.vulnweb.com",
-        scan_results=dummy_scan_results,
-        architecture_data=dummy_architecture_data,
-        hln_stats=dummy_hln_stats,
-        output_filename="HebbScan_Report_Test.pdf",
-        graph_params={
-            "architecture_graph_figsize": tuple(test_config['architecture_graph_figsize']),
-            "vulnerability_map_figsize": tuple(test_config['vulnerability_map_figsize']),
-            "learning_curves_figsize": tuple(test_config['learning_curves_figsize']),
-            "graph_layout_k": test_config['graph_layout_k'],
-            "graph_layout_iterations": test_config['graph_layout_iterations']
+        "discovered_endpoints": [
+            {"url": "http://testphp.vulnweb.com/login.php", "method": "POST", "params": [{"name": "username", "type": "text"}, {"name": "password", "type": "password"}], "type": "FORM", "hash": helpers.hash_data({"url": "http://testphp.vulnweb.com/login.php", "method": "POST"})},
+            {"url": "http://testphp.vulnweb.com/search.php", "method": "GET", "params": [{"name": "query", "type": "text"}], "type": "FORM", "hash": helpers.hash_data({"url": "http://testphp.vulnweb.com/search.php", "method": "GET"})},
+            {"url": "http://testphp.vulnweb.com/listproducts.php", "method": "GET", "params": [{"name": "cat", "type": "text"}], "type": "URL_PARAM", "hash": helpers.hash_data({"url": "http://testphp.vulnweb.com/listproducts.php", "method": "GET", "params": [{"name": "cat", "type": "text"}]})},
+            {"url": "http://testphp.vulnweb.com/api/v1/users", "method": "GET", "params": [], "type": "API_JS", "hash": helpers.hash_data({"url": "http://testphp.vulnweb.com/api/v1/users", "method": "GET"})}
+        ],
+        "scan_results": [
+            {
+                "url": "http://testphp.vulnweb.com/search.php",
+                "method": "GET",
+                "vulnerability_type": "XSS",
+                "payload": "<script>alert(document.cookie)</script>",
+                "criticality": "HIGH",
+                "proof": "Payload reflected without encoding.",
+                "explanation": "Cross-Site Scripting vulnerability.",
+                "recommendations": "Encode output.",
+                "hash": helpers.hash_data({"url": "http://testphp.vulnweb.com/search.php", "vulnerability_type": "XSS", "payload": "<script>alert(document.cookie)</script>"})
+            },
+            {
+                "url": "http://testphp.vulnweb.com/listproducts.php",
+                "method": "GET",
+                "vulnerability_type": "SQLi",
+                "payload": "' OR 1=1 --",
+                "criticality": "CRITICAL",
+                "proof": "SQL error message detected.",
+                "explanation": "SQL Injection vulnerability.",
+                "recommendations": "Use prepared statements.",
+                "hash": helpers.hash_data({"url": "http://testphp.vulnweb.com/listproducts.php", "vulnerability_type": "SQLi", "payload": "' OR 1=1 --"})
+            }
+        ],
+        "hln_stats": {
+            helpers.hash_data({"url": "http://testphp.vulnweb.com/search.php"}): {"url": "http://testphp.vulnweb.com/search.php", "successful_patterns_count": 3, "neuron_weights_avg": 0.75, "evolution_data": [[1, 0.3], [5, 0.5], [10, 0.7]]},
+            helpers.hash_data({"url": "http://testphp.vulnweb.com/login.php"}): {"url": "http://testphp.vulnweb.com/login.php", "successful_patterns_count": 1, "neuron_weights_avg": 0.5, "evolution_data": [[1, 0.2], [3, 0.4]]}
         }
+    }
+    
+    # Save the dummy data to the database for the PDF generator to load
+    # This ensures consistency if you run PDF generator standalone
+    from utils.database import save_scan_data_to_db # Import here if not already at top
+    save_scan_data_to_db(dummy_scan_data)
+
+    # Load data from the database to ensure it's retrieved correctly for PDF generation
+    loaded_scan_data = load_scan_data_from_db()
+
+    pdf_gen = PDFGenerator(
+        output_path=load_config_for_pdf_generator()['pdf_settings']['output_path'],
+        branding_logo=load_config_for_pdf_generator()['pdf_settings']['branding_logo']
     )
+    
+    # Pass the loaded data to the generate_report method
+    pdf_gen.generate_report(
+        target_url=loaded_scan_data.get('target_url', 'N/A'),
+        scan_results=loaded_scan_data.get('scan_results', []),
+        architecture_data={'visited_urls': loaded_scan_data.get('visited_urls', []), 'discovered_endpoints': loaded_scan_data.get('discovered_endpoints', [])},
+        hln_stats=loaded_scan_data.get('hln_stats', {}),
+        output_filename=load_config_for_pdf_generator()['pdf_settings']['default_report_filename'],
+        graph_params=load_config_for_pdf_generator()['pdf_settings'] # Pass all graph params
+    )
+    print(f"Standalone PDF report generated: {os.path.join(pdf_gen.output_path, load_config_for_pdf_generator()['pdf_settings']['default_report_filename'])}")
