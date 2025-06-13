@@ -1,0 +1,14 @@
+httpx
+beautifulsoup4
+lxml
+playwright
+numpy
+reportlab
+matplotlib
+networkx
+Pillow # For PDF branding logo (optional)
+streamlit
+pandas
+plotly
+stem # For Tor integration (optional)
+PyYAML # For config file (if using YAML)
