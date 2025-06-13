@@ -107,7 +107,9 @@ src/
 Description Détaillée des Modules
 IP Rotation Module (Anonymity & Evasion):
 
+```
 Objectif: Assurer l'anonymat, éviter le bannissement et simuler différents profils d'attaquants.
+```
 Fonctionnalités:
 Gestion de pools de proxies (HTTP/S, SOCKS5), VPNs et intégration Tor.
 Rotation dynamique des IPs à chaque requête critique ou détection de blocage/captchas.
@@ -117,7 +119,9 @@ Logging détaillé de l'IP/proxy utilisé pour chaque requête.
 Monitoring optionnel de la géolocalisation des IPs pour des scénarios avancés.
 Crawler & Mapper (Discovery & Parsing):
 
+```
 Objectif: Cartographier l'intégralité de l'architecture du site cible.
+```
 Fonctionnalités:
 Crawling récursif du front-end (HTML, CSS, JS).
 Analyse du code JavaScript pour découvrir des endpoints dynamiques, APIs.
@@ -127,7 +131,9 @@ Identification des assets (images, vidéos, documents) et des fichiers publics s
 Utilisation de headless browsers (Playwright/Selenium) pour le rendu JS et l'interaction.
 Target Profiler (Technology & Framework Detection):
 
+```
 Objectif: Identifier les technologies sous-jacentes du site pour adapter les stratégies d'attaque.
+```
 Fonctionnalités:
 Analyse des headers HTTP (Server, X-Powered-By, etc.).
 Détection des technologies via l'analyse du code source (méta-tags, commentaires, chemins de fichiers JS/CSS spécifiques).
@@ -135,7 +141,9 @@ Fingerprinting des frameworks (e.g., WordPress, Laravel, Django, React, Angular,
 Identification du système d'exploitation du serveur.
 Attack Surface Analyzer (Endpoint & Interaction Point Identification):
 
+```
 Objectif: Identifier tous les points d'entrée et d'interaction potentiels pour des attaques.
+```
 Fonctionnalités:
 Catalogue des formulaires (login, recherche, contact, upload).
 Liste exhaustive des endpoints API (REST, GraphQL, SOAP).
@@ -144,7 +152,9 @@ Analyse des fonctionnalités d'upload de fichiers.
 Détection des points d'interaction client-side via JavaScript.
 Vulnerability Detector (Classic & Logic Flaw Analysis):
 
+```
 Objectif: Tester un large éventail de vulnérabilités, adaptées à la technologie détectée.
+```
 Fonctionnalités:
 Vulnérabilités classiques: XSS, SQLi, CSRF, SSRF, RCE, LFI/RFI, Directory Traversal, Command Injection, File Upload Vulnerabilities, Insecure Deserialization, XXE, Open Redirect, Authentication Bypass, Broken Access Control, Information Disclosure.
 Vulnérabilités logiques/comportementales:
@@ -157,7 +167,9 @@ Failles de concurrence.
 Stratégies d'attaque adaptées aux frameworks et technologies spécifiques (e.g., injections NoSQL pour MongoDB, payloads spécifiques pour .NET ViewState).
 Hebbian Learning Network (HLN) (Payload Generation & Adaptation):
 
+```
 Objectif: Générer, tester, renforcer et muter dynamiquement les patterns d'attaque en s'adaptant aux retours du site.
+```
 Concept Hebbien: "Neurons that fire together, wire together". Ici, les "neurones" représentent des composants de payloads ou des séquences d'actions. Leur "poids" est renforcé lorsque la combinaison mène à un feedback positif (vulnérabilité détectée, anomalie).
 Architecture:
 Réseaux de Neurones Dédiés: Un réseau de neurones Hebbien est instancié pour chaque point d'attaque détecté. Cela permet une spécialisation et une adaptation locale.
@@ -168,7 +180,9 @@ Mutation/Renforcement: Si un payload est efficace, les neurones qui l'ont géné
 Exploration vs. Exploitation: Équilibre dynamique entre l'application de patterns connus et l'exploration de nouvelles mutations.
 Central Memory & Knowledge Base (Cross-Learning & Generalization):
 
+```
 Objectif: Centraliser les découvertes des HLN locaux, généraliser les patterns efficaces et les partager.
+```
 Fonctionnalités:
 Mémoire Long-Terme: Stockage des patterns d'attaque efficaces, des techniques de contournement et des signatures de vulnérabilités.
 Base de Connaissances: Cartographie des relations entre technologies, types de vulnérabilités et payloads efficaces.
@@ -176,7 +190,9 @@ Cross-Learning: Les HLN locaux peuvent requêter cette mémoire centrale pour ob
 Généralisation: Le système tente de dériver des règles et des patterns plus abstraits à partir des succès spécifiques pour les appliquer à de nouveaux contextes.
 Attack Orchestrator (Strategy & Feedback Loop):
 
+```
 Objectif: Coordonner les attaques, gérer le flux d'exécution et interpréter les retours du site pour les HLN.
+```
 Fonctionnalités:
 Sélectionne le type d'attaque en fonction du point d'entrée et du profil technologique.
 Interagit avec les HLN pour obtenir des payloads.
@@ -185,7 +201,9 @@ Fournit un feedback structuré aux HLN (succès, échec, erreur, anomalie).
 Implémente des mécanismes de backoff et de retry en cas de blocage.
 Reporting Module (PDF Generation & Visuals):
 
+```
 Objectif: Générer un rapport professionnel et exhaustif.
+```
 Fonctionnalités:
 Export PDF avec un branding personnalisable.
 Inclusion de l'architecture reconstituée du site.
@@ -199,8 +217,9 @@ Mapping graphique des failles sur l'architecture.
 Courbes d'évolution de l'apprentissage des HLN (nombre de payloads générés, taux de succès).
 Timestamp et informations de scan.
 Web Dashboard (Streamlit & Interactivity):
-
+```
 Objectif: Fournir une interface utilisateur interactive pour visualiser et explorer les résultats en temps réel.
+```
 Fonctionnalités:
 Visualisation de l'architecture scannée (graphique interactif).
 Filtres par criticité, type de vulnérabilité, technologie.
@@ -220,7 +239,7 @@ Logging: logging module standard.
 Configuration: yaml/json.
 Sécurité: Gestion des exceptions, sanitisation des entrées (là où applicable).
 
-
+--------------------------------------------------
 
 Guide d'Installation et d'Utilisation
 
@@ -255,9 +274,15 @@ playwright install (ex: chromium, firefox, webkit).
 pip install -r requirements.txt
 ```
 
-Configurer le fichier 'src/config.py'
+Configurer le fichier :
+```
+config.py
+```
 
-Configurer le fichier 'proxies.txt'
+Configurer le fichier
+```
+proxies.txt
+```
 
 Puis lancer le scan: 
 ```
