@@ -66,7 +66,10 @@ class TechDetector:
                 "url": r"\.php"
             },
             "ASP.NET": {
-                "headers": {"x-aspnet-version": r".*|x-powered-by": r"ASP\.NET"},
+                "headers": {
+                    "x-aspnet-version": r".*",
+                    "x-powered-by": r"ASP\.NET"
+                },
                 "html": r"__VIEWSTATE"
             },
             "Node.js (Express)": {
