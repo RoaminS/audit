@@ -391,7 +391,7 @@ if __name__ == "__main__":
     # Note: When run via dashboard, data comes from DB. For standalone test, you can mock it.
     # If you want to load from DB for standalone test, uncomment the database imports and load function.
     from utils.database import init_db, load_scan_data_from_db
-    from utils import helpers
+    from utils.helpers import hash_data
 
     init_db() # Ensure DB is initialized for loading
 
@@ -407,10 +407,10 @@ if __name__ == "__main__":
             "http://testphp.vulnweb.com/signup.php"
         ],
         "discovered_endpoints": [
-            {"url": "http://testphp.vulnweb.com/login.php", "method": "POST", "params": [{"name": "username", "type": "text"}, {"name": "password", "type": "password"}], "type": "FORM", "hash": helpers.hash_data({"url": "http://testphp.vulnweb.com/login.php", "method": "POST"})},
-            {"url": "http://testphp.vulnweb.com/search.php", "method": "GET", "params": [{"name": "query", "type": "text"}], "type": "FORM", "hash": helpers.hash_data({"url": "http://testphp.vulnweb.com/search.php", "method": "GET"})},
-            {"url": "http://testphp.vulnweb.com/listproducts.php", "method": "GET", "params": [{"name": "cat", "type": "text"}], "type": "URL_PARAM", "hash": helpers.hash_data({"url": "http://testphp.vulnweb.com/listproducts.php", "method": "GET", "params": [{"name": "cat", "type": "text"}]})},
-            {"url": "http://testphp.vulnweb.com/api/v1/users", "method": "GET", "params": [], "type": "API_JS", "hash": helpers.hash_data({"url": "http://testphp.vulnweb.com/api/v1/users", "method": "GET"})}
+            {"url": "http://testphp.vulnweb.com/login.php", "method": "POST", "params": [{"name": "username", "type": "text"}, {"name": "password", "type": "password"}], "type": "FORM", "hash": hash_data({"url": "http://testphp.vulnweb.com/login.php", "method": "POST"})},
+            {"url": "http://testphp.vulnweb.com/search.php", "method": "GET", "params": [{"name": "query", "type": "text"}], "type": "FORM", "hash": hash_data({"url": "http://testphp.vulnweb.com/search.php", "method": "GET"})},
+            {"url": "http://testphp.vulnweb.com/listproducts.php", "method": "GET", "params": [{"name": "cat", "type": "text"}], "type": "URL_PARAM", "hash": hash_data({"url": "http://testphp.vulnweb.com/listproducts.php", "method": "GET", "params": [{"name": "cat", "type": "text"}]})},
+            {"url": "http://testphp.vulnweb.com/api/v1/users", "method": "GET", "params": [], "type": "API_JS", "hash": hash_data({"url": "http://testphp.vulnweb.com/api/v1/users", "method": "GET"})}
         ],
         "scan_results": [
             {
@@ -422,7 +422,7 @@ if __name__ == "__main__":
                 "proof": "Payload reflected without encoding.",
                 "explanation": "Cross-Site Scripting vulnerability.",
                 "recommendations": "Encode output.",
-                "hash": helpers.hash_data({"url": "http://testphp.vulnweb.com/search.php", "vulnerability_type": "XSS", "payload": "<script>alert(document.cookie)</script>"})
+                "hash": hash_data({"url": "http://testphp.vulnweb.com/search.php", "vulnerability_type": "XSS", "payload": "<script>alert(document.cookie)</script>"})
             },
             {
                 "url": "http://testphp.vulnweb.com/listproducts.php",
@@ -433,12 +433,12 @@ if __name__ == "__main__":
                 "proof": "SQL error message detected.",
                 "explanation": "SQL Injection vulnerability.",
                 "recommendations": "Use prepared statements.",
-                "hash": helpers.hash_data({"url": "http://testphp.vulnweb.com/listproducts.php", "vulnerability_type": "SQLi", "payload": "' OR 1=1 --"})
+                "hash": hash_data({"url": "http://testphp.vulnweb.com/listproducts.php", "vulnerability_type": "SQLi", "payload": "' OR 1=1 --"})
             }
         ],
         "hln_stats": {
-            helpers.hash_data({"url": "http://testphp.vulnweb.com/search.php"}): {"url": "http://testphp.vulnweb.com/search.php", "successful_patterns_count": 3, "neuron_weights_avg": 0.75, "evolution_data": [[1, 0.3], [5, 0.5], [10, 0.7]]},
-            helpers.hash_data({"url": "http://testphp.vulnweb.com/login.php"}): {"url": "http://testphp.vulnweb.com/login.php", "successful_patterns_count": 1, "neuron_weights_avg": 0.5, "evolution_data": [[1, 0.2], [3, 0.4]]}
+            hash_data({"url": "http://testphp.vulnweb.com/search.php"}): {"url": "http://testphp.vulnweb.com/search.php", "successful_patterns_count": 3, "neuron_weights_avg": 0.75, "evolution_data": [[1, 0.3], [5, 0.5], [10, 0.7]]},
+            hash_data({"url": "http://testphp.vulnweb.com/login.php"}): {"url": "http://testphp.vulnweb.com/login.php", "successful_patterns_count": 1, "neuron_weights_avg": 0.5, "evolution_data": [[1, 0.2], [3, 0.4]]}
         }
     }
     
