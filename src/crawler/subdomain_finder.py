@@ -52,12 +52,12 @@ class SubdomainFinder:
         test_url_http = f"http://{subdomain}"
         test_url_https = f"https://{subdomain}"
         
-        async with await self.ip_rotator.get_proxies_for_request() as proxies_config:
-            async with httpx.AsyncClient(proxies=proxies_config, follow_redirects=True, timeout=5) as client:
-                for url_to_check in [test_url_https, test_url_http]: # Prioritize HTTPS
-                    try:
-                        logger.debug(f"Checking subdomain: {url_to_check}")
-                        response = await client.get(url_to_check)
+        proxies_config = await self.ip_rotator.get_proxies_for_request()
+        async with httpx.AsyncClient(proxies=proxies_config, follow_redirects=True, timeout=5) as client:
+            for url_to_check in [test_url_https, test_url_http]: # Prioritize HTTPS
+                try:
+                    logger.debug(f"Checking subdomain: {url_to_check}")
+                    response = await client.get(url_to_check)
                         if response.status_code < 400: # 2xx or 3xx status codes
                             logger.info(f"Subdomain discovered: {subdomain} (Status: {response.status_code})")
                             self.discovered_subdomains.add(subdomain)
@@ -123,13 +123,13 @@ class SubdomainFinder:
 
         found_subdomains = set()
         
-        async with await self.ip_rotator.get_proxies_for_request() as proxies_config:
-            async with httpx.AsyncClient(proxies=proxies_config, follow_redirects=True, timeout=10) as client:
-                for source_url in passive_sources:
-                    try:
-                        logger.debug(f"Querying passive source: {source_url}")
-                        response = await client.get(source_url)
-                        response.raise_for_status()
+        proxies_config = await self.ip_rotator.get_proxies_for_request()
+        async with httpx.AsyncClient(proxies=proxies_config, follow_redirects=True, timeout=10) as client:
+            for source_url in passive_sources:
+                try:
+                    logger.debug(f"Querying passive source: {source_url}")
+                    response = await client.get(source_url)
+                    response.raise_for_status()
                         
                         if "crt.sh" in source_url:
                             data = response.json()
@@ -194,22 +194,13 @@ async def test_subdomain_finder():
     class DummyIpRotator:
         def __init__(self):
             # Mock get_proxies_for_request to return None for direct connection
-            self.proxies_for_request = None 
+            self.proxies_for_request = None
             self.current_proxy = None
             self.proxy_type = "Direct"
 
         async def get_proxies_for_request(self, force_tor=False):
-            # Mock the context manager for httpx.AsyncClient
-            class AsyncProxyContext:
-                async def __aenter__(self):
-                    return self.proxies
-                async def __aexit__(self, exc_type, exc_val, exc_tb):
-                    pass
-                def __init__(self, proxies):
-                    self.proxies = proxies
-
-            # For testing, we'll just return None, meaning direct connection
-            return AsyncProxyContext(None) 
+            # For testing, simply return None to indicate a direct connection
+            return None
             
         def get_current_proxy(self): return self.current_proxy
         def get_proxy_type(self): return self.proxy_type

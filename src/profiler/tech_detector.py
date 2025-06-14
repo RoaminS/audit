@@ -181,8 +181,8 @@ class TechDetector:
                 # simuler l'appel à une méthode de httpx.AsyncClient ou passer la config proxy.
                 
                 # Solution temporaire: Le IPRotator devrait fournir les configs de proxy
-                async with await ip_rotator.get_proxies_for_request() as proxies_config:
-                    async with httpx.AsyncClient(proxies=proxies_config, follow_redirects=True, timeout=10) as client:
+                proxies_config = await ip_rotator.get_proxies_for_request()
+                async with httpx.AsyncClient(proxies=proxies_config, follow_redirects=True, timeout=10) as client:
                         response = await client.get(url)
                         response.raise_for_status()
                         html_content = response.text
@@ -229,14 +229,8 @@ async def test_tech_detector():
             self.proxy_type = "Direct"
 
         async def get_proxies_for_request(self, force_tor=False):
-            class AsyncProxyContext:
-                async def __aenter__(self):
-                    return self.proxies
-                async def __aexit__(self, exc_type, exc_val, exc_tb):
-                    pass
-                def __init__(self, proxies):
-                    self.proxies = proxies
-            return AsyncProxyContext(None) # Pas de proxy pour ce test simple
+            # Retourne None pour indiquer une connexion directe
+            return None
 
         def get_current_proxy(self): return self.current_proxy
         def get_proxy_type(self): return self.proxy_type
