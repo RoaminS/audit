@@ -1,7 +1,7 @@
 # main.py
 import asyncio
 import logging
-from src.anonymity.ip_rotator import IpRotator
+from src.anonymity.ip_rotator import IPRotator
 from src.crawler.crawler import Crawler
 from src.profiler.tech_detector import TechDetector # Placeholder, will be implemented
 from src.attack_surface.analyzer import AttackSurfaceAnalyzer # Placeholder
@@ -47,7 +47,7 @@ async def main():
     logger.info(f"Starting HebbScan on target: {TARGET_URL}")
 
     # 1. Initialize IP Rotator
-    ip_rotator = IpRotator(
+    ip_rotator = IPRotator(
         proxy_list_path=PROXY_LIST_PATH,
         use_tor=USE_TOR,
         tor_port=TOR_SOCKS_PORT,
