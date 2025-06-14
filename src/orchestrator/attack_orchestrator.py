@@ -7,7 +7,7 @@ from typing import Dict, Any, List, Optional, Tuple
 import numpy as np # Used for neuron_weights_avg in stats
 
 # Import necessary components from other modules
-from src.anonymity.ip_rotator import IpRotator
+from src.anonymity.ip_rotator import IPRotator
 from src.hebbian_learning.hebbian_network import HebbianNetwork
 from src.hebbian_learning.central_memory import CentralMemory
 from src.hebbian_learning.feedback_interpreter import FeedbackInterpreter
@@ -21,12 +21,12 @@ class AttackOrchestrator:
     Il gère la sélection des Hebbian Learning Networks (HLN), l'envoi des requêtes HTTP,
     l'interprétation des réponses et la gestion de la mémoire centrale.
     """
-    def __init__(self, ip_rotator: IpRotator, central_memory: CentralMemory):
+    def __init__(self, ip_rotator: IPRotator, central_memory: CentralMemory):
         """
         Initialise l'Orchestrateur d'Attaques.
 
         Args:
-            ip_rotator (IpRotator): Instance du rotateur d'IP pour gérer l'anonymat.
+            ip_rotator (IPRotator): Instance du rotateur d'IP pour gérer l'anonymat.
             central_memory (CentralMemory): Instance de la mémoire centrale pour le cross-learning.
         """
         self.ip_rotator = ip_rotator

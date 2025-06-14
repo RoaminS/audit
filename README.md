@@ -304,7 +304,7 @@ pip install -r requirements.txt
 #     f.write("http://mock-good-proxy1.com:8080\n")
 #     f.write("http://mock-bad-proxy.com:8081\n") # This will be simulated to fail
 
-# Initialize IpRotator with some example configuration (adjust as needed for your setup)
+# Initialize IPRotator with some example configuration (adjust as needed for your setup)
 # Using a dummy proxy list and Tor enabled for demonstration.
 # Replace "your_tor_password" if you have one set for your Tor control port.
 ip_rotator = IPRotator(
