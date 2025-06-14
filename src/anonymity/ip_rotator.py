@@ -71,6 +71,9 @@ class IPRotator:
             self.current_ip_source = "direct"
             logger.info("No proxy or Tor configured. Requests will use direct IP by default.")
 
+        # Counter for consecutive 429 HTTP status codes
+        self.consecutive_429 = 0
+
 
     async def get_proxies_for_request(self, force_tor=False):
         """
@@ -165,6 +168,16 @@ class IPRotator:
             self.current_ip_source = "direct"
             self.current_proxy_or_tor_address = None
             return False
+
+    async def record_http_status(self, status_code: int):
+        """Record an HTTP status code and switch to Tor after three 429 errors."""
+        if status_code == 429:
+            self.consecutive_429 += 1
+            if self.consecutive_429 >= 3:
+                await self.rotate_ip(force_tor=True)
+                self.consecutive_429 = 0
+        else:
+            self.consecutive_429 = 0
 
 
     async def get_current_external_ip(self):
