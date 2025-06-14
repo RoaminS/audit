@@ -12,3 +12,5 @@ pandas
 plotly
 stem # For Tor integration (optional)
 PyYAML # For config file (if using YAML)
+pytest
+pytest-asyncio
