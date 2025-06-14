@@ -79,7 +79,8 @@ class AttackOrchestrator:
                 response.raise_for_status() 
                 return response
         except httpx.HTTPStatusError as e:
-            logger.warning(f"HTTP error for {url} ({method}): {e.response.status_code} - {e.response.text[:100].replace('\n', ' ')}...")
+            clean = e.response.text[:100].replace('\n', ' ')
+            logger.warning(f"HTTP error for {url} ({method}): {e.response.status_code} - {clean}...")
             # Common blocking/error codes: 403 Forbidden, 429 Too Many Requests, 500 Internal Server Error
             if e.response.status_code in [403, 429]: 
                 logger.warning(f"Detected potential block for {url}. Rotating IP.")

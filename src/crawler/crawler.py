@@ -80,7 +80,8 @@ class Crawler:
                 response.raise_for_status() # Raise an exception for HTTP errors (4xx or 5xx)
                 return response
         except httpx.HTTPStatusError as e:
-            logger.warning(f"HTTP error for {url}: {e.response.status_code} - {e.response.text[:100].replace('\n', ' ')}")
+            clean = e.response.text[:100].replace('\n', ' ')
+            logger.warning(f"HTTP error for {url}: {e.response.status_code} - {clean}")
             # Consider rotating IP on certain status codes like 403, 429
             if e.response.status_code in [403, 429, 503]: # Added 503 Service Unavailable
                 logger.warning(f"Detected potential block for {url}. Rotating IP.")
