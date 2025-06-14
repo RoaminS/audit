@@ -66,6 +66,10 @@ def save_scan_data(data):
     # For now, we only support database.
     save_scan_data_to_db(data)
 
+# Backwards compatibility with older imports
+def save_data(data):
+    save_scan_data(data)
+
 # Import PDFGenerator if you want to trigger PDF generation from dashboard
 from reporting.pdf_generator import PDFGenerator
 
@@ -127,6 +131,12 @@ def run_dashboard():
         if new_graph_k != config['pdf_settings']['graph_layout_k'] or new_graph_iter != config['pdf_settings']['graph_layout_iterations']:
             config['pdf_settings']['graph_layout_k'] = new_graph_k
             config['pdf_settings']['graph_layout_iterations'] = new_graph_iter
+            save_config(config)
+
+    with st.sidebar.expander("Scan Settings"):
+        new_default_target = st.text_input("Default Target URL", config['scan_settings']['default_target_url'])
+        if new_default_target != config['scan_settings']['default_target_url']:
+            config['scan_settings']['default_target_url'] = new_default_target
             save_config(config)
 
     # Add a button to generate PDF report from the dashboard

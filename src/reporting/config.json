@@ -1,6 +1,6 @@
 {
     "dashboard_settings": {
-        "data_file": "scan_results.json"
+        "data_source": "database"
     },
     "pdf_settings": {
         "output_path": "reports",
