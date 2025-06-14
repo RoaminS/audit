@@ -9,6 +9,7 @@ import os
 
 # Import models from .models
 from .models import Base, URL, DiscoveredEndpoint, Vulnerability, HLNStats
+from utils.helpers import hash_data
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ def save_scan_data_to_db(scan_data):
             # Discovered Endpoints
             for ep_data in scan_data.get('discovered_endpoints', []):
                 # Use hash to check for uniqueness, or find by url+method
-                ep_hash = ep_data.get('hash', helpers.hash_data(ep_data)) # Assume hash is added by scanner or generate
+                ep_hash = ep_data.get('hash', hash_data(ep_data)) # Assume hash is added by scanner or generate
                 existing_ep = session.query(DiscoveredEndpoint).filter_by(endpoint_hash=ep_hash).first()
                 if not existing_ep:
                     session.add(DiscoveredEndpoint(
@@ -100,7 +101,7 @@ def save_scan_data_to_db(scan_data):
             
             # Scan Results (Vulnerabilities)
             for vuln_data in scan_data.get('scan_results', []):
-                vuln_hash = helpers.hash_data({ # Create a hash for uniqueness of vulnerability finding
+                vuln_hash = hash_data({ # Create a hash for uniqueness of vulnerability finding
                     'url': vuln_data.get('url'),
                     'vulnerability_type': vuln_data.get('vulnerability_type'),
                     'payload': vuln_data.get('payload')
