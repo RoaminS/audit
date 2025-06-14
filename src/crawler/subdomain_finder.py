@@ -58,17 +58,19 @@ class SubdomainFinder:
                 try:
                     logger.debug(f"Checking subdomain: {url_to_check}")
                     response = await client.get(url_to_check)
-                        if response.status_code < 400:  # 2xx or 3xx status codes
-                            logger.info(f"Subdomain discovered: {subdomain} (Status: {response.status_code})")
-                            self.discovered_subdomains.add(subdomain)
-                            return subdomain
-                    except httpx.RequestError as e:
-                        logger.debug(f"Subdomain {url_to_check} not accessible: {e}")
-                        # Don't rotate IP here, as it's a brute-force check,
-                        # and individual subdomain failures might not indicate a block.
-                        # IP rotation is better handled by the main crawler's fetch logic.
-                    except Exception as e:
-                        logger.error(f"Unexpected error checking subdomain {url_to_check}: {e}")
+                    if response.status_code < 400:  # 2xx or 3xx status codes
+                        logger.info(
+                            f"Subdomain discovered: {subdomain} (Status: {response.status_code})"
+                        )
+                        self.discovered_subdomains.add(subdomain)
+                        return subdomain
+                except httpx.RequestError as e:
+                    logger.debug(f"Subdomain {url_to_check} not accessible: {e}")
+                    # Don't rotate IP here, as it's a brute-force check,
+                    # and individual subdomain failures might not indicate a block.
+                    # IP rotation is better handled by the main crawler's fetch logic.
+                except Exception as e:
+                    logger.error(f"Unexpected error checking subdomain {url_to_check}: {e}")
         return None
 
     async def brute_force_subdomains(self, concurrency: int = 100) -> list[str]:
@@ -130,26 +132,28 @@ class SubdomainFinder:
                     logger.debug(f"Querying passive source: {source_url}")
                     response = await client.get(source_url)
                     response.raise_for_status()
-                        
-                        if "crt.sh" in source_url:
-                            data = response.json()
-                            for entry in data:
-                                # Extract common name and SANs
-                                name_value = entry.get('name_value')
-                                if name_value:
-                                    # Split by newline or comma to get individual domains
-                                    for domain_entry in re.split(r'\s*,\s*|\n', name_value):
-                                        if domain_entry.endswith(self.base_domain) and domain_entry != self.base_domain:
-                                            # Remove wildcard prefix if present
-                                            clean_domain = domain_entry.lstrip('*')
-                                            if clean_domain.startswith('.'):
-                                                clean_domain = clean_domain[1:]
-                                            found_subdomains.add(clean_domain)
-                                            logger.debug(f"Discovered passive subdomain: {clean_domain}")
-                    except httpx.RequestError as e:
-                        logger.warning(f"Error querying passive source {source_url}: {e}")
-                    except Exception as e:
-                        logger.error(f"Unexpected error in passive discovery from {source_url}: {e}")
+
+                    if "crt.sh" in source_url:
+                        data = response.json()
+                        for entry in data:
+                            # Extract common name and SANs
+                            name_value = entry.get('name_value')
+                            if name_value:
+                                # Split by newline or comma to get individual domains
+                                for domain_entry in re.split(r'\s*,\s*|\n', name_value):
+                                    if domain_entry.endswith(self.base_domain) and domain_entry != self.base_domain:
+                                        # Remove wildcard prefix if present
+                                        clean_domain = domain_entry.lstrip('*')
+                                        if clean_domain.startswith('.'):
+                                            clean_domain = clean_domain[1:]
+                                        found_subdomains.add(clean_domain)
+                                        logger.debug(
+                                            f"Discovered passive subdomain: {clean_domain}"
+                                        )
+                except httpx.RequestError as e:
+                    logger.warning(f"Error querying passive source {source_url}: {e}")
+                except Exception as e:
+                    logger.error(f"Unexpected error in passive discovery from {source_url}: {e}")
 
         self.discovered_subdomains.update(found_subdomains)
         logger.info(f"Finished passive subdomain discovery. Discovered {len(found_subdomains)} new subdomains.")
