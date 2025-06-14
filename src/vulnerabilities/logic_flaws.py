@@ -114,7 +114,8 @@ async def test_logic_flaws_vuln():
         async def get_proxies_for_request(self, force_tor=False):
             class AsyncProxyContext:
                 async def __aenter__(self): return None
-                async async def __aexit__(self, exc_type, exc_val, exc_tb): pass
+                async def __aexit__(self, exc_type, exc_val, exc_tb):
+                    pass
             return AsyncProxyContext(None)
         async def rotate_ip(self): pass
 
