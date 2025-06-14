@@ -58,7 +58,7 @@ class SubdomainFinder:
                 try:
                     logger.debug(f"Checking subdomain: {url_to_check}")
                     response = await client.get(url_to_check)
-                        if response.status_code < 400: # 2xx or 3xx status codes
+                        if response.status_code < 400:  # 2xx or 3xx status codes
                             logger.info(f"Subdomain discovered: {subdomain} (Status: {response.status_code})")
                             self.discovered_subdomains.add(subdomain)
                             return subdomain
