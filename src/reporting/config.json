@@ -14,6 +14,5 @@
     },
     "scan_settings": {
         "default_target_url": "http://testphp.vulnweb.com"
-        // ... autres paramètres de scan si tu en as
     }
 }
